@@ -33,6 +33,31 @@ API interna para analisar imagens enviadas ao Solaria, identificar conteúdo ina
 
 </div>
 
+## Tecnologias e responsabilidades
+
+| Tecnologia | Uso neste serviço |
+| --- | --- |
+| **Python** | Implementa a API, as regras de moderação e a orquestração da análise. |
+| **FastAPI** | Expõe os endpoints internos, recebe o upload e gera a documentação interativa em `/docs`. |
+| **Pydantic** | Valida os sinais estruturados retornados pelos provedores e modela a resposta da API. |
+| **Pillow** | Abre, valida e normaliza as imagens; corrige a orientação EXIF e remove metadados antes da análise. |
+| **HTTPX** | Faz as chamadas HTTP aos provedores de visão. |
+| **Gemini e GroqCloud** | Analisam o conteúdo visual e geram a legenda; o GroqCloud atua como fallback em falhas técnicas. |
+| **Uvicorn** | Executa a aplicação FastAPI como servidor HTTP. |
+| **Docker** | Empacota o serviço e suas dependências para execução em contêiner. |
+
+## Como a análise funciona
+
+`upload` → validação e normalização da imagem → moderação por IA → decisão pelas regras locais → geração e validação da legenda, se a imagem for aprovada.
+
+| Decisão | Quando ocorre | Legenda |
+| --- | --- | --- |
+| `approved` | A análise não identificou risco e a legenda passou na validação. | Retornada em `alt_text`. |
+| `review_required` | Há risco incerto, bloqueio de segurança, falha técnica ou legenda inválida. | Não é retornada. |
+| `rejected` | A imagem é inválida ou a política identificou conteúdo proibido inequívoco. | Não é retornada. |
+
+A decisão é tomada pelo serviço a partir dos sinais dos provedores. Uma resposta HTTP 200 indica que a análise terminou; somente `approved` pode seguir para as próximas etapas de publicação, que ainda dependem da integração com os demais serviços.
+
 ## Estado atual
 
 O MVP aceita JPEG, PNG ou WebP por `POST /v1/images/analyze`, valida o arquivo, consulta um provedor de IA para sinais de moderação, aplica uma política determinística e, se aprovado, gera uma descrição curta. A resposta é `approved`, `review_required` ou `rejected`. O serviço não armazena nem publica a mídia.
