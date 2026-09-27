@@ -52,3 +52,5 @@ Uma aprovação é apenas um resultado da análise. O backend que futuramente re
 Na resposta, `risk_categories` lista categorias de risco identificadas. Lista vazia junto de `PROVIDER_UNAVAILABLE` não comprova que a imagem seja segura.
 
 <!-- pr de teste dos comentarios automaticos, pode reverter -->
+
+<!-- pr de teste dos comentarios automaticos, pode reverter -->
