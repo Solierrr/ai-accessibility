@@ -54,3 +54,5 @@ Na resposta, `risk_categories` lista categorias de risco identificadas. Lista va
 <!-- pr de teste dos comentarios automaticos, pode reverter -->
 
 <!-- pr de teste dos comentarios automaticos, pode reverter -->
+
+<!-- pr de teste dos comentarios automaticos, pode reverter -->
