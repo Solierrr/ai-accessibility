@@ -52,15 +52,4 @@ jobs:
     uses: Solierrr/.github/.github/workflows/qa-sync.yml@main
     with:
       source-pr-number: ${{ github.event.issue.number }}
-
-  sync-merge:
-    if: |
-      github.event_name == 'issue_comment' && github.event.action == 'edited' && github.event.issue.pull_request &&
-      github.event.sender.login != 'github-actions[bot]' &&
-      contains(github.event.comment.body, '- [x] **Mergear automaticamente a pull request de sincronização**')
-    permissions:
-      contents: write
-      pull-requests: write
-    uses: Solierrr/.github/.github/workflows/qa-sync-merge.yml@main
-    with:
-      source-pr-number: ${{ github.event.issue.number }}
+      auto-merge: true
