@@ -50,3 +50,5 @@ Configure a chave Gemini em `GEMINI_AI_ACCESSIBILITY_KEY`; `GOOGLE_API_KEY` aind
 Uma aprovação é apenas um resultado da análise. O backend que futuramente receberá o upload deve manter o arquivo privado até o autor confirmar o texto alternativo e o sistema concluir a publicação.
 
 Na resposta, `risk_categories` lista categorias de risco identificadas. Lista vazia junto de `PROVIDER_UNAVAILABLE` não comprova que a imagem seja segura.
+
+<!-- pr de teste dos comentarios automaticos, pode reverter -->
