@@ -19,10 +19,20 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          existing_pr=$(gh pr list --repo "${{ github.repository }}" --base qa --head main --state open --json number --jq '.[0].number')
+
+          message="Essa pull request foi mergeada diretamente na branch \`main\`, portanto a branch \`qa\` ficará desatualizada caso ela não seja sincronizada. Marque a caixa abaixo para sincronizar automaticamente a branch \`qa\`"
+          if [ -n "$existing_pr" ] && [ "$existing_pr" != "null" ]; then
+            existing_pr_url="https://github.com/${{ github.repository }}/pull/$existing_pr"
+            message="$message ou, se achar necessário, acesse diretamente a [pull request da sincronização]($existing_pr_url)."
+          else
+            message="$message."
+          fi
+
           body=$(printf '%s\n' \
             "## Sincronização de branches" \
             "" \
-            "Essa pull request foi mergeada diretamente na branch \`main\`, portanto a branch \`qa\` ficará desatualizada caso ela não seja sincronizada. Marque a caixa abaixo para sincronizar automaticamente a branch \`qa\`." \
+            "$message" \
             "" \
             "- [ ] **Sincronizar automaticamente a branch \`qa\`**" \
             "" \
