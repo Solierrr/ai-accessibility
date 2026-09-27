@@ -22,14 +22,16 @@ jobs:
           body=$(printf '%s\n' \
             "## Sincronização de branches" \
             "" \
-            "Essa pull request foi mergeada diretamente na branch \`main\`, portanto a branch \`qa\` ficará desatualizada. Marque a caixa abaixo para sincronizar automaticamente a branch \`qa\`." \
+            "Essa pull request foi mergeada diretamente na branch \`main\`, portanto a branch \`qa\` ficará desatualizada caso ela não seja sincronizada. Marque a caixa abaixo para sincronizar automaticamente a branch \`qa\`." \
             "" \
-            "- [ ] Sincronizar automaticamente a branch \`qa\`")
+            "- [ ] **Sincronizar automaticamente a branch \`qa\`**" \
+            "" \
+            "<!-- qa-sync-source-command -->")
 
           gh pr comment ${{ github.event.pull_request.number }} --repo ${{ github.repository }} --body "$body"
 
   sync:
-    if: github.event_name == 'issue_comment' && github.event.action == 'edited' && github.event.issue.pull_request && contains(github.event.comment.body, '- [x] Sincronizar automaticamente a branch `qa`')
+    if: github.event_name == 'issue_comment' && github.event.action == 'edited' && github.event.issue.pull_request && contains(github.event.comment.body, '- [x] **Sincronizar automaticamente a branch `qa`**')
     permissions:
       contents: write
       pull-requests: write
