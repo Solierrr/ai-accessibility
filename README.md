@@ -1,6 +1,6 @@
 # ai-accessibility
 
-API interna para analisar imagens enviadas ao Solaria, identificar conteúdo inadequado e sugerir textos alternativos para acessibilidade.
+API interna para analisar imagens enviadas ao Solaria, identificar conteúdo inadequado e sugerir textos alternativos para acessibilidade
 
 <p>
 
