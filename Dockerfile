@@ -5,12 +5,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends curl ca-certificates gnupg \
-    && curl -1sLf 'https://artifacts-cli.infisical.com/setup.deb.sh' | bash \
-    && apt-get update \
-    && apt-get install -y --no-install-recommends infisical \
-    && rm -rf /var/lib/apt/lists/*
+COPY --from=infisical/cli:0.43.138 /bin/infisical /usr/local/bin/infisical
 
 COPY requirements.txt .
 RUN apt-get update \
