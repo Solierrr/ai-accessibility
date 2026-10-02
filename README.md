@@ -45,7 +45,7 @@ API interna para analisar imagens enviadas ao Solaria, identificar conteúdo ina
 | **LangGraph** | Orquestra validação, análise multimodal e decisão em um grafo com rotas explícitas. |
 | **Pydantic** | Valida os sinais estruturados retornados pelos provedores e modela a resposta da API. |
 | **Pillow** | Valida a imagem, corrige a orientação EXIF, remove metadados e gera JPEG RGB de até 800 × 800 pixels com qualidade 85 antes da IA. |
-| **Gemini e GroqCloud** | Analisam o conteúdo visual e geram a legenda; o provedor e a chave vêm do `google-registry`, com troca de chave em falhas técnicas. |
+| **Gemini e GroqCloud** | Analisam o conteúdo visual e geram a legenda; o provedor e a chave vêm do `google-registry` (cliente da lib `solaria-lib`), com troca de chave em falhas técnicas. |
 | **Uvicorn** | Executa a aplicação FastAPI como servidor HTTP. |
 | **Docker** | Empacota o serviço e suas dependências para execução em contêiner. |
 
