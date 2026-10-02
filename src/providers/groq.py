@@ -6,9 +6,15 @@ from src.core.llm.llm_groq import llm_groq
 
 
 class GroqImageAnalysisProvider(ImageAnalysisAgent):
-    def __init__(self, settings: Settings, model: BaseChatModel | None = None) -> None:
+    def __init__(
+        self,
+        settings: Settings,
+        model: BaseChatModel | None = None,
+        *,
+        api_key: str = "",
+    ) -> None:
         super().__init__(
-            model or llm_groq(settings),
+            model or llm_groq(settings, api_key),
             model_version=f"groq/{settings.groq_model}",
             backend="groq",
         )

@@ -318,7 +318,7 @@ class ApiTests(unittest.TestCase):
     def test_authentication_and_analysis_contract(self) -> None:
         async def run() -> None:
             settings = Settings(
-                google_api_key="test-key"
+                registry_url="http://registry.test", registry_token="test-token"
             )
             provider = FakeProvider()
             app = create_app(settings, provider, auth_verifier=FakeAuthVerifier())

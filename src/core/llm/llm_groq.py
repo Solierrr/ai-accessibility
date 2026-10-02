@@ -3,12 +3,10 @@ from langchain_groq import ChatGroq
 from src.core.config import Settings
 
 
-def llm_groq(settings: Settings) -> ChatGroq:
-    if not settings.groq_api_key:
-        raise ValueError("GroqCloud não configurado")
+def llm_groq(settings: Settings, api_key: str) -> ChatGroq:
     return ChatGroq(
         model=settings.groq_model,
-        api_key=settings.groq_api_key,
+        api_key=api_key,
         timeout=settings.gemini_timeout_seconds,
         max_retries=1,
         max_tokens=1024,

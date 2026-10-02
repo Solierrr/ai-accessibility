@@ -45,7 +45,7 @@ API interna para analisar imagens enviadas ao Solaria, identificar conteúdo ina
 | **LangGraph** | Orquestra validação, análise multimodal e decisão em um grafo com rotas explícitas. |
 | **Pydantic** | Valida os sinais estruturados retornados pelos provedores e modela a resposta da API. |
 | **Pillow** | Valida a imagem, corrige a orientação EXIF, remove metadados e gera JPEG RGB de até 800 × 800 pixels com qualidade 85 antes da IA. |
-| **Gemini e GroqCloud** | Analisam o conteúdo visual e geram a legenda; o GroqCloud atua como fallback em falhas técnicas. |
+| **Gemini e GroqCloud** | Analisam o conteúdo visual e geram a legenda; o provedor e a chave vêm do `google-registry`, com troca de chave em falhas técnicas. |
 | **Uvicorn** | Executa a aplicação FastAPI como servidor HTTP. |
 | **Docker** | Empacota o serviço e suas dependências para execução em contêiner. |
 
@@ -53,7 +53,7 @@ API interna para analisar imagens enviadas ao Solaria, identificar conteúdo ina
 
 `upload` → validação e normalização da imagem → uma chamada multimodal com sinais de risco e sugestão de legenda → decisão pelas regras locais.
 
-O modelo devolve `is_safe`, `motivo_bloqueio`, `legenda_acessivel` e sinais estruturados de risco no mesmo resultado Pydantic. O serviço só retorna a legenda se a política aprovar a imagem e a legenda passar pela validação local. O fallback para GroqCloud acrescenta uma chamada apenas se o Gemini falhar tecnicamente.
+O modelo devolve `is_safe`, `motivo_bloqueio`, `legenda_acessivel` e sinais estruturados de risco no mesmo resultado Pydantic. O serviço só retorna a legenda se a política aprovar a imagem e a legenda passar pela validação local. A troca de chave acrescenta uma chamada apenas se o provedor falhar tecnicamente.
 
 A finalidade também é verificada: `company_profile` aceita identidade visual ou instalações empresariais; `professional_profile` aceita retrato com roupa cotidiana ou de trabalho; `product` aceita equipamento ou acessório ligado à energia fotovoltaica. Uma incompatibilidade clara retorna `rejected` com `PURPOSE_MISMATCH`; evidência incerta retorna `review_required` com `PURPOSE_UNCERTAIN`. Esses motivos não são categorias de risco. A avaliação do retrato não considera beleza, corpo ou atributos pessoais. A imagem, sozinha, não comprova que o prédio pertença à empresa ou que a pessoa seja o profissional cadastrado.
 
@@ -83,9 +83,9 @@ O `web-app` ainda não tem upload conectado a esta API. Para testar agora, envie
 
 Para teste local, execute o `api-auth` com seu JWKS público em `http://localhost:8081/.well-known/jwks.json` e obtenha um `accessToken` por `POST /auth/login`. Configure `JWT_JWK_SET_URI` se a URL for diferente e `JWT_ISSUER` se o emissor não for `solaria-auth`. Esta API valida a assinatura RS256, o emissor, a expiração, o tipo `access` e as identidades de usuário e sessão. Se o JWKS estiver indisponível, responde 503 sem processar a imagem. Como a verificação é local, revogação de sessão ou bloqueio da conta no `api-auth` só passam a valer aqui quando o access token expirar; a integração com uma verificação online de sessão ainda não está definida.
 
-Configure a chave Gemini em `GEMINI_AI_ACCESSIBILITY_KEY`; `GOOGLE_API_KEY` ainda funciona como nome legado. Se ambas estiverem definidas, a chave específica deste serviço tem prioridade. `GROQ_AI_ACCESSIBILITY_KEY` ativa o GroqCloud como fallback em falhas técnicas. Com `GROQ_MODEL` vazio, usa `qwen/qwen3.8-27b`. GroqCloud e xAI/Grok são serviços diferentes.
+As chaves de IA vêm do `google-registry`: configure `GOOGLE_REGISTRY_URL` e `REGISTRY_CONSUMER_TOKEN`. A cada análise o serviço pede uma chave (Gemini ou GroqCloud, conforme o rodízio do registry), avisa o resultado de uso e, em falha técnica ou limite de uso, troca por outra chave (até `REGISTRY_MAX_ATTEMPTS`, padrão 3). Com o registry indisponível a análise falha de modo conservador com `PROVIDER_UNAVAILABLE`. Com `GROQ_MODEL` vazio, usa `qwen/qwen3.8-27b`. GroqCloud e xAI/Grok são serviços diferentes.
 
 Uma aprovação é apenas um resultado da análise. O backend que futuramente receberá o upload deve manter o arquivo privado até o autor confirmar o texto alternativo e o sistema concluir a publicação.
 
 Na resposta, `risk_categories` lista categorias de risco identificadas. Lista vazia junto de `PROVIDER_UNAVAILABLE` não comprova que a imagem seja segura.
-`model_version` mostra os modelos tentados quando o fallback é acionado.
+`model_version` mostra o modelo que concluiu a análise.
