@@ -12,10 +12,11 @@ from src.agents.base.image_analysis_agent import UnavailableImageAnalysisProvide
 from src.api.auth import ApiAuthTokenVerifier
 from src.api.upload_gate import UploadGate
 from src.caption.validation import DEFAULT_ALT_TEXT_CHARS
+from src.clients.registry import RegistryClient, RegistryConfig
 from src.core.config import Settings
 from src.image.validation import MAX_UPLOAD_BYTES
-from src.providers.gemini import GeminiImageAnalysisProvider, ImageAnalysisProvider
-from src.providers.groq import GroqImageAnalysisProvider
+from src.providers.gemini import ImageAnalysisProvider
+from src.providers.registry import RegistryImageAnalysisProvider
 from src.services.analysis import AnalysisResponse, analyze_image
 from src.workflow.graph.graph import build_analysis_graph
 
@@ -41,14 +42,19 @@ def create_app(
 ) -> FastAPI:
     settings = settings or Settings.from_env()
     provider = provider or (
-        GeminiImageAnalysisProvider(settings)
-        if settings.google_api_key
-        else GroqImageAnalysisProvider(settings)
-        if settings.groq_api_key
+        RegistryImageAnalysisProvider(
+            settings,
+            RegistryClient(
+                RegistryConfig(
+                    base_url=settings.registry_url or "",
+                    token=settings.registry_token or "",
+                    timeout_seconds=settings.registry_timeout_seconds,
+                )
+            ),
+        )
+        if settings.registry_configured
         else UnavailableImageAnalysisProvider()
     )
-    if fallback_provider is None and settings.google_api_key and settings.groq_api_key:
-        fallback_provider = GroqImageAnalysisProvider(settings)
     workflow = build_analysis_graph(provider, fallback_provider)
     semaphore = asyncio.Semaphore(settings.max_concurrent_analyses)
     application = FastAPI(title="Solaria AI Accessibility", version="0.1.0")
@@ -74,7 +80,7 @@ def create_app(
             HTTPAuthorizationCredentials | None, Security(bearer_scheme)
         ] = None,
     ) -> AnalysisResponse:
-        if not (settings.google_api_key or settings.groq_api_key):
+        if not settings.registry_configured:
             raise HTTPException(
                 status_code=503, detail="Provedor de visão não configurado"
             )

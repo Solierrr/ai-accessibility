@@ -63,7 +63,7 @@ class GeminiProviderTests(unittest.TestCase):
             "parsed": safe_suggestion(),
             "parsing_error": None,
         }])
-        provider = GeminiImageAnalysisProvider(Settings("test-key"), model)
+        provider = GeminiImageAnalysisProvider(Settings(), model)
         observation = asyncio.run(provider.analyze(
             sample_image(), purpose="product", title="", max_alt_chars=150,
         ))
@@ -84,7 +84,7 @@ class GeminiProviderTests(unittest.TestCase):
             "parsed": safe_suggestion(),
             "parsing_error": None,
         }])
-        provider = GeminiImageAnalysisProvider(Settings("test-key"), model)
+        provider = GeminiImageAnalysisProvider(Settings(), model)
         observation = asyncio.run(provider.analyze(
             sample_image(), purpose="product", title="", max_alt_chars=150,
         ))
@@ -93,7 +93,7 @@ class GeminiProviderTests(unittest.TestCase):
     def test_block_and_invalid_output_never_look_safe(self) -> None:
         async def check(response, error_type):
             provider = GeminiImageAnalysisProvider(
-                Settings("test-key"), FakeModel([response])
+                Settings(), FakeModel([response])
             )
             with self.assertRaises(error_type):
                 await provider.analyze(

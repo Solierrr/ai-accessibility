@@ -78,7 +78,10 @@ def analysis_node(primary: ImageAnalysisProvider, fallback: ImageAnalysisProvide
                         "reason_codes": ("PROVIDER_UNAVAILABLE",),
                         "used_models": attempted_models}
             return {"observation": observation, "used_models": attempted_models}
-        return {"observation": observation, "used_models": [active.model_version]}
+        return {
+            "observation": observation,
+            "used_models": [observation.model_version or active.model_version],
+        }
 
     return run
 

@@ -31,6 +31,7 @@ class ProviderInvalidOutput(ProviderError):
 class ImageObservation:
     suggestion: ImageAnalysisSuggestion
     safety_flagged: bool
+    model_version: str | None = None
 
 
 class ImageAnalysisProvider(Protocol):
