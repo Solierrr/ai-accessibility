@@ -1,7 +1,4 @@
-"""API interna para análise de imagem; não publica nem armazena arquivos."""
-
 import asyncio
-import hmac
 import logging
 import re
 from enum import StrEnum
@@ -11,18 +8,23 @@ from uuid import uuid4
 from fastapi import FastAPI, File, Form, HTTPException, Security, UploadFile
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
+from src.agents.base.image_analysis_agent import UnavailableImageAnalysisProvider
+from src.api.auth import ApiAuthTokenVerifier
 from src.api.upload_gate import UploadGate
 from src.caption.validation import DEFAULT_ALT_TEXT_CHARS
+from src.clients.registry import RegistryClient, RegistryConfig
 from src.core.config import Settings
 from src.image.validation import MAX_UPLOAD_BYTES
-from src.providers.gemini import GeminiVisionProvider, VisionProvider
-from src.providers.groq import GroqVisionProvider
+from src.providers.gemini import ImageAnalysisProvider
+from src.providers.registry import RegistryImageAnalysisProvider
 from src.services.analysis import AnalysisResponse, analyze_image
+from src.workflow.graph.graph import build_analysis_graph
 
 logger = logging.getLogger(__name__)
 bearer_scheme = HTTPBearer(
     auto_error=False,
-    description="Token interno do ai-accessibility. No Swagger, informe só o valor; Bearer é acrescentado automaticamente.",
+    bearerFormat="JWT",
+    description="Access token JWT emitido pelo api-auth. No Swagger, informe só o valor.",
 )
 
 
@@ -30,25 +32,38 @@ class Purpose(StrEnum):
     PRODUCT = "product"
     COMPANY_PROFILE = "company_profile"
     PROFESSIONAL_PROFILE = "professional_profile"
-    OTHER = "other"
 
 
 def create_app(
     settings: Settings | None = None,
-    provider: VisionProvider | None = None,
-    fallback_provider: VisionProvider | None = None,
+    provider: ImageAnalysisProvider | None = None,
+    fallback_provider: ImageAnalysisProvider | None = None,
+    auth_verifier: ApiAuthTokenVerifier | None = None,
 ) -> FastAPI:
     settings = settings or Settings.from_env()
     provider = provider or (
-        GeminiVisionProvider(settings)
-        if settings.google_api_key
-        else GroqVisionProvider(settings)
+        RegistryImageAnalysisProvider(
+            settings,
+            RegistryClient(
+                RegistryConfig(
+                    base_url=settings.registry_url or "",
+                    token=settings.registry_token or "",
+                    timeout_seconds=settings.registry_timeout_seconds,
+                )
+            ),
+        )
+        if settings.registry_configured
+        else UnavailableImageAnalysisProvider()
     )
-    if fallback_provider is None and settings.google_api_key and settings.groq_api_key:
-        fallback_provider = GroqVisionProvider(settings)
+    workflow = build_analysis_graph(provider, fallback_provider)
     semaphore = asyncio.Semaphore(settings.max_concurrent_analyses)
     application = FastAPI(title="Solaria AI Accessibility", version="0.1.0")
-    application.add_middleware(UploadGate, token=settings.internal_api_token)
+    application.add_middleware(
+        UploadGate,
+        verifier=auth_verifier or ApiAuthTokenVerifier(
+            settings.jwt_jwks_url, settings.jwt_issuer
+        ),
+    )
 
     @application.get("/health")
     async def health() -> dict[str, object]:
@@ -65,14 +80,7 @@ def create_app(
             HTTPAuthorizationCredentials | None, Security(bearer_scheme)
         ] = None,
     ) -> AnalysisResponse:
-        if not settings.internal_api_token:
-            raise HTTPException(
-                status_code=503, detail="Autenticação interna não configurada"
-            )
-        supplied = credentials.credentials if credentials else ""
-        if not hmac.compare_digest(supplied, settings.internal_api_token):
-            raise HTTPException(status_code=401, detail="Credencial interna inválida")
-        if not (settings.google_api_key or settings.groq_api_key):
+        if not settings.registry_configured:
             raise HTTPException(
                 status_code=503, detail="Provedor de visão não configurado"
             )
@@ -92,6 +100,7 @@ def create_app(
                 purpose=purpose.value,
                 max_alt_chars=max_alt_chars,
                 context_title=context_title,
+                workflow=workflow,
             )
         logger.info(
             "image_analysis analysis_id=%s request_id=%s decision=%s reasons=%s",

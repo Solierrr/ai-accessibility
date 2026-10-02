@@ -1,11 +1,9 @@
-"""Decisão determinística sobre sinais do provedor."""
-
 from dataclasses import dataclass
 from enum import StrEnum
 
 from src.moderation.models import Confidence, Context, Severity, VisionAssessment
 
-POLICY_VERSION = "v1"
+POLICY_VERSION = "v4"
 
 
 class Decision(StrEnum):
