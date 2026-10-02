@@ -1,5 +1,3 @@
-"""Configuração lida em cada inicialização; segredos nunca entram no código."""
-
 import os
 import re
 from dataclasses import dataclass
@@ -13,7 +11,8 @@ _MODEL_PATTERN = re.compile(r"^[A-Za-z0-9._-]+$")
 @dataclass(frozen=True, slots=True)
 class Settings:
     google_api_key: str | None
-    internal_api_token: str | None
+    jwt_jwks_url: str = "http://localhost:8081/.well-known/jwks.json"
+    jwt_issuer: str = "solaria-auth"
     gemini_model: str = "gemini-3.5-flash"
     gemini_timeout_seconds: float = 60.0
     max_concurrent_analyses: int = 4
@@ -39,7 +38,10 @@ class Settings:
                 or os.getenv("GOOGLE_API_KEY")
                 or None
             ),
-            internal_api_token=os.getenv("INTERNAL_API_TOKEN") or None,
+            jwt_jwks_url=os.getenv(
+                "JWT_JWK_SET_URI", "http://localhost:8081/.well-known/jwks.json"
+            ),
+            jwt_issuer=os.getenv("JWT_ISSUER", "solaria-auth"),
             gemini_model=model,
             gemini_timeout_seconds=timeout,
             max_concurrent_analyses=concurrency,
@@ -49,4 +51,8 @@ class Settings:
 
     @property
     def ready(self) -> bool:
-        return bool((self.google_api_key or self.groq_api_key) and self.internal_api_token)
+        return bool(
+            (self.google_api_key or self.groq_api_key)
+            and self.jwt_jwks_url
+            and self.jwt_issuer
+        )
