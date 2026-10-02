@@ -93,7 +93,9 @@ class RegistryClient:
         if retry_after_seconds:
             body["retry_after_seconds"] = retry_after_seconds
         try:
-            await self._request("POST", f"/v1/llm/keys/{key_id}/report", json=body, retries=0)
+            await self._request(
+                "POST", f"/v1/llm/keys/{key_id}/report", json=body, retries=0
+            )
         except RegistryError:
             logger.warning("registry_report_failed outcome=%s", outcome)
 

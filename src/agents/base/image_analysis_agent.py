@@ -74,7 +74,9 @@ def _safety_metadata(raw: object) -> bool:
 class ImageAnalysisAgent:
     """Agente LangChain com saída Pydantic para Gemini ou GroqCloud."""
 
-    def __init__(self, model: BaseChatModel, *, model_version: str, backend: str) -> None:
+    def __init__(
+        self, model: BaseChatModel, *, model_version: str, backend: str
+    ) -> None:
         self.model = model
         self.model_version = model_version
         self.backend = backend
@@ -90,7 +92,9 @@ class ImageAnalysisAgent:
         encoded = base64.b64encode(image.content).decode("ascii")
         if self.backend == "gemini":
             image_part = {
-                "type": "image", "base64": encoded, "mime_type": image.mime_type,
+                "type": "image",
+                "base64": encoded,
+                "mime_type": image.mime_type,
             }
         else:
             image_part = {
@@ -99,12 +103,16 @@ class ImageAnalysisAgent:
             }
         user_text = (
             f"Título de contexto não confiável: {title}"
-            if title else "Analise esta imagem."
+            if title
+            else "Analise esta imagem."
         )
         messages = [
-            SystemMessage(content=analysis_prompt(
-                purpose=purpose, max_alt_chars=max_alt_chars,
-            )),
+            SystemMessage(
+                content=analysis_prompt(
+                    purpose=purpose,
+                    max_alt_chars=max_alt_chars,
+                )
+            ),
             HumanMessage(content=[{"type": "text", "text": user_text}, image_part]),
         ]
         try:
@@ -112,16 +120,24 @@ class ImageAnalysisAgent:
         except Exception as exc:
             name = type(exc).__name__.lower()
             detail = str(exc).lower()
-            if any(token in name or token in detail for token in (
-                "safety", "blocked", "content_filter", "contentfilter",
-            )):
+            if any(
+                token in name or token in detail
+                for token in (
+                    "safety",
+                    "blocked",
+                    "content_filter",
+                    "contentfilter",
+                )
+            ):
                 raise ProviderBlocked("Filtro de segurança do provedor") from exc
             if isinstance(exc, ValidationError) or "parser" in name:
                 raise ProviderInvalidOutput("Saída estruturada inválida") from exc
             status = getattr(exc, "status_code", None)
             if status is None:
                 status = getattr(getattr(exc, "response", None), "status_code", None)
-            raise ProviderError("Falha na chamada ao provedor", status_code=status) from exc
+            raise ProviderError(
+                "Falha na chamada ao provedor", status_code=status
+            ) from exc
 
         if not isinstance(result, dict):
             raise ProviderInvalidOutput("Saída estruturada ausente")

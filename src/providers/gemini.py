@@ -1,12 +1,12 @@
 from langchain_core.language_models.chat_models import BaseChatModel
 
 from src.agents.base.image_analysis_agent import (
+    ImageAnalysisAgent,
+    ImageAnalysisProvider,
     ImageObservation,
     ProviderBlocked,
     ProviderError,
     ProviderInvalidOutput,
-    ImageAnalysisAgent,
-    ImageAnalysisProvider,
 )
 from src.core.config import Settings
 from src.core.llm.llm_gemini import llm_gemini
@@ -28,6 +28,10 @@ class GeminiImageAnalysisProvider(ImageAnalysisAgent):
 
 
 __all__ = [
-    "GeminiImageAnalysisProvider", "ImageObservation", "ProviderBlocked",
-    "ProviderError", "ProviderInvalidOutput", "ImageAnalysisProvider",
+    "GeminiImageAnalysisProvider",
+    "ImageAnalysisProvider",
+    "ImageObservation",
+    "ProviderBlocked",
+    "ProviderError",
+    "ProviderInvalidOutput",
 ]

@@ -45,7 +45,9 @@ class RegistryImageAnalysisProvider:
             try:
                 lease = await self.registry.lease(exclude=tuple(excluded))
             except RegistryError as exc:
-                raise failure or ProviderError("Chave de IA indisponível no registry") from exc
+                raise failure or ProviderError(
+                    "Chave de IA indisponível no registry"
+                ) from exc
 
             try:
                 provider = self._provider_for(lease)
@@ -59,7 +61,9 @@ class RegistryImageAnalysisProvider:
                 failure = exc
                 excluded.append(lease.key_id)
                 logger.warning(
-                    "registry_key_failure provider=%s status=%s", lease.provider, exc.status_code
+                    "registry_key_failure provider=%s status=%s",
+                    lease.provider,
+                    exc.status_code,
                 )
                 outcome = _outcome_for(exc.status_code)
                 if outcome:

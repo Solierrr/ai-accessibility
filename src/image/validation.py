@@ -72,14 +72,18 @@ def validate_image(content: bytes) -> ValidatedImage:
 
                 source.load()
                 oriented = ImageOps.exif_transpose(source)
-                has_alpha = "A" in oriented.getbands() or "transparency" in oriented.info
+                has_alpha = (
+                    "A" in oriented.getbands() or "transparency" in oriented.info
+                )
                 clean = Image.new("RGB", oriented.size, "white")
                 if has_alpha:
                     rgba = oriented.convert("RGBA")
                     clean.paste(rgba, mask=rgba.getchannel("A"))
                 else:
                     clean.paste(oriented.convert("RGB"))
-                clean.thumbnail((MAX_MODEL_SIDE, MAX_MODEL_SIDE), Image.Resampling.LANCZOS)
+                clean.thumbnail(
+                    (MAX_MODEL_SIDE, MAX_MODEL_SIDE), Image.Resampling.LANCZOS
+                )
                 output = BytesIO()
                 # Só pixels são copiados: EXIF e demais metadados não chegam ao modelo.
                 clean.save(output, format="JPEG", quality=85, optimize=True)

@@ -80,7 +80,9 @@ class CaptionSuggestion(BaseModel):
 class ImageAnalysisSuggestion(VisionAssessment):
     """Uma resposta do modelo contém moderação e legenda; política decide o destino."""
 
-    is_safe: bool = Field(description="Segurança do conteúdo, independente da finalidade do upload")
+    is_safe: bool = Field(
+        description="Segurança do conteúdo, independente da finalidade do upload"
+    )
     purpose_evidence: PurposeEvidence = Field(
         description="Elemento visual principal que relaciona a imagem à finalidade informada"
     )

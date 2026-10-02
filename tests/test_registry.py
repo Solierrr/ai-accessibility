@@ -79,13 +79,19 @@ class RegistryClientTests(unittest.TestCase):
 
         client, _ = make_client(handler)
         lease = asyncio.run(client.lease(exclude=("a", "b")))
-        self.assertEqual((lease.provider, lease.key_id, lease.api_key), ("gemini", "k1", "secret-k1"))
+        self.assertEqual(
+            (lease.provider, lease.key_id, lease.api_key), ("gemini", "k1", "secret-k1")
+        )
         self.assertEqual(seen[0].headers["authorization"], "Bearer tok")
         self.assertEqual(seen[0].url.params.get_list("exclude"), ["a", "b"])
         self.assertNotIn("secret-k1", repr(lease))
 
     def test_retries_503_with_backoff_then_succeeds(self) -> None:
-        responses = [httpx.Response(503), httpx.Response(503), httpx.Response(200, json=lease_body("k1"))]
+        responses = [
+            httpx.Response(503),
+            httpx.Response(503),
+            httpx.Response(200, json=lease_body("k1")),
+        ]
         client, sleeps = make_client(lambda request: responses.pop(0))
         lease = asyncio.run(client.lease())
         self.assertEqual(lease.key_id, "k1")
@@ -101,13 +107,17 @@ class RegistryClientTests(unittest.TestCase):
         self.assertEqual(sleeps, [5.0])
 
     def test_long_retry_after_fails_without_waiting(self) -> None:
-        client, sleeps = make_client(lambda request: httpx.Response(503, headers={"Retry-After": "60"}))
+        client, sleeps = make_client(
+            lambda request: httpx.Response(503, headers={"Retry-After": "60"})
+        )
         with self.assertRaises(NoKeyAvailable):
             asyncio.run(client.lease())
         self.assertEqual(sleeps, [])
 
     def test_exhausted_retries_with_retry_after_means_no_key(self) -> None:
-        client, _ = make_client(lambda request: httpx.Response(503, headers={"Retry-After": "2"}))
+        client, _ = make_client(
+            lambda request: httpx.Response(503, headers={"Retry-After": "2"})
+        )
         with self.assertRaises(NoKeyAvailable):
             asyncio.run(client.lease())
 
@@ -159,7 +169,9 @@ class FakeInnerProvider:
 
 class RegistryProviderTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.settings = Settings(registry_url="http://registry.test", registry_token="tok")
+        self.settings = Settings(
+            registry_url="http://registry.test", registry_token="tok"
+        )
         self.observation = ImageObservation(
             ImageAnalysisSuggestion.model_construct(), safety_flagged=False
         )
@@ -172,7 +184,9 @@ class RegistryProviderTests(unittest.TestCase):
 
     def run_analysis(self, provider):
         return asyncio.run(
-            provider.analyze(sample_image(), purpose="product", title="", max_alt_chars=150)
+            provider.analyze(
+                sample_image(), purpose="product", title="", max_alt_chars=150
+            )
         )
 
     def test_success_reports_ok_and_exposes_model_version(self) -> None:
@@ -184,7 +198,9 @@ class RegistryProviderTests(unittest.TestCase):
     def test_rate_limited_key_is_reported_and_replaced(self) -> None:
         registry = FakeRegistry([_lease("k1"), _lease("k2")])
         result = self.run_analysis(
-            self.provider(registry, [ProviderError("x", status_code=429), self.observation])
+            self.provider(
+                registry, [ProviderError("x", status_code=429), self.observation]
+            )
         )
         self.assertIsNotNone(result)
         self.assertEqual(registry.lease_calls, [(), ("k1",)])
@@ -192,7 +208,11 @@ class RegistryProviderTests(unittest.TestCase):
 
     def test_invalid_key_is_reported(self) -> None:
         registry = FakeRegistry([_lease("k1"), _lease("k2")])
-        self.run_analysis(self.provider(registry, [ProviderError("x", status_code=401), self.observation]))
+        self.run_analysis(
+            self.provider(
+                registry, [ProviderError("x", status_code=401), self.observation]
+            )
+        )
         self.assertEqual(registry.reports[0], ("k1", "invalid"))
 
     def test_gives_up_after_max_attempts(self) -> None:

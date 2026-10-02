@@ -60,9 +60,8 @@ def create_app(
     application = FastAPI(title="Solaria AI Accessibility", version="0.1.0")
     application.add_middleware(
         UploadGate,
-        verifier=auth_verifier or ApiAuthTokenVerifier(
-            settings.jwt_jwks_url, settings.jwt_issuer
-        ),
+        verifier=auth_verifier
+        or ApiAuthTokenVerifier(settings.jwt_jwks_url, settings.jwt_issuer),
     )
 
     @application.get("/health")

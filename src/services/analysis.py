@@ -48,7 +48,9 @@ async def analyze_image(
         decision=state.get("decision", Decision.REVIEW_REQUIRED),
         reason_codes=list(state.get("reason_codes", ("ANALYSIS_INCOMPLETE",))),
         risk_categories=list(state.get("risk_categories", ())),
-        alt_text=state.get("alt_text") if state.get("decision") == Decision.APPROVED else None,
+        alt_text=state.get("alt_text")
+        if state.get("decision") == Decision.APPROVED
+        else None,
         policy_version=POLICY_VERSION,
         model_version="+".join(state.get("used_models", [])) or provider.model_version,
     )

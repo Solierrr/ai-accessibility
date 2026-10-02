@@ -37,7 +37,9 @@ class Settings:
         if timeout <= 0 or not 1 <= concurrency <= 32:
             raise ValueError("Configuração de timeout ou concorrência inválida")
         if registry_timeout <= 0 or not 1 <= registry_attempts <= 5:
-            raise ValueError("Configuração de timeout ou tentativas do registry inválida")
+            raise ValueError(
+                "Configuração de timeout ou tentativas do registry inválida"
+            )
         return cls(
             registry_url=os.getenv("GOOGLE_REGISTRY_URL") or None,
             registry_token=os.getenv("REGISTRY_CONSUMER_TOKEN") or None,
@@ -59,8 +61,4 @@ class Settings:
 
     @property
     def ready(self) -> bool:
-        return bool(
-            self.registry_configured
-            and self.jwt_jwks_url
-            and self.jwt_issuer
-        )
+        return bool(self.registry_configured and self.jwt_jwks_url and self.jwt_issuer)

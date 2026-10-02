@@ -58,60 +58,99 @@ class FakeModel:
 
 class GeminiProviderTests(unittest.TestCase):
     def test_single_call_sends_image_and_parses_both_signals(self) -> None:
-        model = FakeModel([{
-            "raw": AIMessage(content="", response_metadata={"finish_reason": "STOP"}),
-            "parsed": safe_suggestion(),
-            "parsing_error": None,
-        }])
+        model = FakeModel(
+            [
+                {
+                    "raw": AIMessage(
+                        content="", response_metadata={"finish_reason": "STOP"}
+                    ),
+                    "parsed": safe_suggestion(),
+                    "parsing_error": None,
+                }
+            ]
+        )
         provider = GeminiImageAnalysisProvider(Settings(), model)
-        observation = asyncio.run(provider.analyze(
-            sample_image(), purpose="product", title="", max_alt_chars=150,
-        ))
+        observation = asyncio.run(
+            provider.analyze(
+                sample_image(),
+                purpose="product",
+                title="",
+                max_alt_chars=150,
+            )
+        )
         self.assertEqual(len(model.messages), 1)
         self.assertTrue(observation.suggestion.is_safe)
-        self.assertEqual(observation.suggestion.legenda_acessivel, "Painel solar sobre o telhado.")
+        self.assertEqual(
+            observation.suggestion.legenda_acessivel, "Painel solar sobre o telhado."
+        )
         image_part = model.messages[0][1].content[1]
         self.assertEqual(image_part["mime_type"], "image/jpeg")
         self.assertTrue(image_part["base64"])
         self.assertEqual(model.options[0][1]["method"], "json_schema")
 
     def test_safety_rating_requests_review(self) -> None:
-        model = FakeModel([{
-            "raw": AIMessage(content="", response_metadata={
-                "finish_reason": "STOP",
-                "safety_ratings": [{"probability": "MEDIUM"}],
-            }),
-            "parsed": safe_suggestion(),
-            "parsing_error": None,
-        }])
+        model = FakeModel(
+            [
+                {
+                    "raw": AIMessage(
+                        content="",
+                        response_metadata={
+                            "finish_reason": "STOP",
+                            "safety_ratings": [{"probability": "MEDIUM"}],
+                        },
+                    ),
+                    "parsed": safe_suggestion(),
+                    "parsing_error": None,
+                }
+            ]
+        )
         provider = GeminiImageAnalysisProvider(Settings(), model)
-        observation = asyncio.run(provider.analyze(
-            sample_image(), purpose="product", title="", max_alt_chars=150,
-        ))
+        observation = asyncio.run(
+            provider.analyze(
+                sample_image(),
+                purpose="product",
+                title="",
+                max_alt_chars=150,
+            )
+        )
         self.assertTrue(observation.safety_flagged)
 
     def test_block_and_invalid_output_never_look_safe(self) -> None:
         async def check(response, error_type):
-            provider = GeminiImageAnalysisProvider(
-                Settings(), FakeModel([response])
-            )
+            provider = GeminiImageAnalysisProvider(Settings(), FakeModel([response]))
             with self.assertRaises(error_type):
                 await provider.analyze(
-                    sample_image(), purpose="product", title="", max_alt_chars=150,
+                    sample_image(),
+                    purpose="product",
+                    title="",
+                    max_alt_chars=150,
                 )
 
-        asyncio.run(check({
-            "raw": AIMessage(content="", response_metadata={
-                "prompt_feedback": {"block_reason": "SAFETY"},
-            }),
-            "parsed": None,
-            "parsing_error": None,
-        }, ProviderBlocked))
-        asyncio.run(check({
-            "raw": AIMessage(content="{}"),
-            "parsed": None,
-            "parsing_error": ValueError("invalid"),
-        }, ProviderInvalidOutput))
+        asyncio.run(
+            check(
+                {
+                    "raw": AIMessage(
+                        content="",
+                        response_metadata={
+                            "prompt_feedback": {"block_reason": "SAFETY"},
+                        },
+                    ),
+                    "parsed": None,
+                    "parsing_error": None,
+                },
+                ProviderBlocked,
+            )
+        )
+        asyncio.run(
+            check(
+                {
+                    "raw": AIMessage(content="{}"),
+                    "parsed": None,
+                    "parsing_error": ValueError("invalid"),
+                },
+                ProviderInvalidOutput,
+            )
+        )
 
 
 if __name__ == "__main__":

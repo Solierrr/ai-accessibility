@@ -45,16 +45,18 @@ class ApiAuthTokenVerifier:
 
     async def _fetch_keys(self) -> dict[str, jwt.PyJWK]:
         try:
-            async with httpx.AsyncClient(timeout=5.0, follow_redirects=False) as client:
-                async with client.stream("GET", self.jwks_url) as response:
-                    response.raise_for_status()
-                    chunks = []
-                    size = 0
-                    async for chunk in response.aiter_bytes():
-                        size += len(chunk)
-                        if size > 65_536:
-                            raise ValueError("JWKS excede limite de tamanho")
-                        chunks.append(chunk)
+            async with (
+                httpx.AsyncClient(timeout=5.0, follow_redirects=False) as client,
+                client.stream("GET", self.jwks_url) as response,
+            ):
+                response.raise_for_status()
+                chunks = []
+                size = 0
+                async for chunk in response.aiter_bytes():
+                    size += len(chunk)
+                    if size > 65_536:
+                        raise ValueError("JWKS excede limite de tamanho")
+                    chunks.append(chunk)
             document = json.loads(b"".join(chunks))
             entries = document["keys"]
             if not isinstance(entries, list) or not 1 <= len(entries) <= 32:
@@ -62,7 +64,7 @@ class ApiAuthTokenVerifier:
             keys: dict[str, jwt.PyJWK] = {}
             for entry in entries:
                 if not isinstance(entry, dict):
-                    raise ValueError("JWKS inválido")
+                    raise ValueError("JWKS inválido")  # noqa: TRY004
                 if (
                     entry.get("kty") != "RSA"
                     or entry.get("alg", "RS256") != "RS256"
@@ -76,8 +78,14 @@ class ApiAuthTokenVerifier:
             if not keys:
                 raise ValueError("JWKS sem chaves RS256")
             return keys
-        except (httpx.HTTPError, json.JSONDecodeError, KeyError, TypeError,
-                ValueError, jwt.PyJWTError) as exc:
+        except (
+            httpx.HTTPError,
+            json.JSONDecodeError,
+            KeyError,
+            TypeError,
+            ValueError,
+            jwt.PyJWTError,
+        ) as exc:
             raise AuthKeysUnavailable from exc
 
     async def _key_for(self, kid: str) -> jwt.PyJWK:

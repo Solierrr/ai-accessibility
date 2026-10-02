@@ -17,9 +17,7 @@ from src.api.auth import (
 class ApiAuthTokenTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
-        cls.private_key = rsa.generate_private_key(
-            public_exponent=65537, key_size=2048
-        )
+        cls.private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
         public_jwk = jwt.algorithms.RSAAlgorithm.to_jwk(
             cls.private_key.public_key(), as_dict=True
         )
@@ -45,7 +43,9 @@ class ApiAuthTokenTests(unittest.TestCase):
         }
         claims.update(overrides)
         return jwt.encode(
-            claims, self.private_key, algorithm="RS256",
+            claims,
+            self.private_key,
+            algorithm="RS256",
             headers={"kid": "test-key"},
         )
 
@@ -66,17 +66,21 @@ class ApiAuthTokenTests(unittest.TestCase):
             self.token(token_type="refresh"),
             self.token(sid="not-a-uuid"),
         ):
-            with self.subTest(token=token[:8]):
-                with self.assertRaises(InvalidAccessToken):
-                    asyncio.run(self.verifier().verify(token))
+            with self.subTest(token=token[:8]), self.assertRaises(InvalidAccessToken):
+                asyncio.run(self.verifier().verify(token))
 
     def test_rejects_tampered_and_unsigned_tokens(self) -> None:
         signed = self.token()
         tampered = signed[:-3] + ("abc" if signed[-3:] != "abc" else "def")
-        for token in (tampered, jwt.encode(
-            {"sub": str(uuid4())}, key="", algorithm="none",
-            headers={"kid": "test-key"},
-        )):
+        for token in (
+            tampered,
+            jwt.encode(
+                {"sub": str(uuid4())},
+                key="",
+                algorithm="none",
+                headers={"kid": "test-key"},
+            ),
+        ):
             with self.assertRaises(InvalidAccessToken):
                 asyncio.run(self.verifier().verify(token))
 

@@ -1,10 +1,10 @@
 import logging
 
 from src.agents.base.image_analysis_agent import (
+    ImageAnalysisProvider,
     ProviderBlocked,
     ProviderError,
     ProviderInvalidOutput,
-    ImageAnalysisProvider,
 )
 from src.caption.validation import validated_alt_text
 from src.image.validation import ImageValidationError, validate_image
@@ -32,7 +32,9 @@ def validate_node(state: ImageAnalysisState) -> ImageAnalysisState:
         return {"decision": Decision.REJECTED, "reason_codes": (exc.code,)}
 
 
-def analysis_node(primary: ImageAnalysisProvider, fallback: ImageAnalysisProvider | None):
+def analysis_node(
+    primary: ImageAnalysisProvider, fallback: ImageAnalysisProvider | None
+):
     async def run(state: ImageAnalysisState) -> ImageAnalysisState:
         active = primary
 
@@ -47,36 +49,48 @@ def analysis_node(primary: ImageAnalysisProvider, fallback: ImageAnalysisProvide
         try:
             observation = await invoke(active)
         except ProviderBlocked:
-            return {"decision": Decision.REVIEW_REQUIRED,
-                    "reason_codes": ("PROVIDER_SAFETY_FLAG",),
-                    "used_models": [active.model_version]}
+            return {
+                "decision": Decision.REVIEW_REQUIRED,
+                "reason_codes": ("PROVIDER_SAFETY_FLAG",),
+                "used_models": [active.model_version],
+            }
         except ProviderInvalidOutput:
-            return {"decision": Decision.REVIEW_REQUIRED,
-                    "reason_codes": ("ANALYSIS_INVALID",),
-                    "used_models": [active.model_version]}
+            return {
+                "decision": Decision.REVIEW_REQUIRED,
+                "reason_codes": ("ANALYSIS_INVALID",),
+                "used_models": [active.model_version],
+            }
         except ProviderError as exc:
             _log_failure(active, exc)
             if fallback is None:
-                return {"decision": Decision.REVIEW_REQUIRED,
-                        "reason_codes": ("PROVIDER_UNAVAILABLE",),
-                        "used_models": [active.model_version]}
+                return {
+                    "decision": Decision.REVIEW_REQUIRED,
+                    "reason_codes": ("PROVIDER_UNAVAILABLE",),
+                    "used_models": [active.model_version],
+                }
             attempted_models = [active.model_version, fallback.model_version]
             active = fallback
             try:
                 observation = await invoke(active)
             except ProviderBlocked:
-                return {"decision": Decision.REVIEW_REQUIRED,
-                        "reason_codes": ("PROVIDER_SAFETY_FLAG",),
-                        "used_models": attempted_models}
+                return {
+                    "decision": Decision.REVIEW_REQUIRED,
+                    "reason_codes": ("PROVIDER_SAFETY_FLAG",),
+                    "used_models": attempted_models,
+                }
             except ProviderInvalidOutput:
-                return {"decision": Decision.REVIEW_REQUIRED,
-                        "reason_codes": ("ANALYSIS_INVALID",),
-                        "used_models": attempted_models}
+                return {
+                    "decision": Decision.REVIEW_REQUIRED,
+                    "reason_codes": ("ANALYSIS_INVALID",),
+                    "used_models": attempted_models,
+                }
             except ProviderError as fallback_exc:
                 _log_failure(active, fallback_exc)
-                return {"decision": Decision.REVIEW_REQUIRED,
-                        "reason_codes": ("PROVIDER_UNAVAILABLE",),
-                        "used_models": attempted_models}
+                return {
+                    "decision": Decision.REVIEW_REQUIRED,
+                    "reason_codes": ("PROVIDER_UNAVAILABLE",),
+                    "used_models": attempted_models,
+                }
             return {"observation": observation, "used_models": attempted_models}
         return {
             "observation": observation,
@@ -107,8 +121,10 @@ def policy_node(state: ImageAnalysisState) -> ImageAnalysisState:
         }
 
     if not suggestion.is_safe or suggestion.motivo_bloqueio:
-        return {"decision": Decision.REVIEW_REQUIRED,
-                "reason_codes": ("ANALYSIS_INCONSISTENT",)}
+        return {
+            "decision": Decision.REVIEW_REQUIRED,
+            "reason_codes": ("ANALYSIS_INCONSISTENT",),
+        }
 
     caption = CaptionSuggestion(
         alt_text=suggestion.legenda_acessivel or "",
@@ -116,6 +132,8 @@ def policy_node(state: ImageAnalysisState) -> ImageAnalysisState:
     )
     alt_text = validated_alt_text(caption, max_alt_chars=state["max_alt_chars"])
     if alt_text is None:
-        return {"decision": Decision.REVIEW_REQUIRED,
-                "reason_codes": ("CAPTION_INVALID",)}
+        return {
+            "decision": Decision.REVIEW_REQUIRED,
+            "reason_codes": ("CAPTION_INVALID",),
+        }
     return {"decision": Decision.APPROVED, "reason_codes": (), "alt_text": alt_text}
