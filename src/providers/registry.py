@@ -1,5 +1,7 @@
 import logging
 
+from ai_lib.registry import KeyLease, Outcome, RegistryClient, RegistryError
+
 from src.agents.base.image_analysis_agent import (
     ImageAnalysisProvider,
     ImageObservation,
@@ -7,7 +9,6 @@ from src.agents.base.image_analysis_agent import (
     ProviderError,
     ProviderInvalidOutput,
 )
-from src.clients.registry import KeyLease, Outcome, RegistryClient, RegistryError
 from src.core.config import Settings
 from src.image.validation import ValidatedImage
 from src.providers.gemini import GeminiImageAnalysisProvider
@@ -43,7 +44,7 @@ class RegistryImageAnalysisProvider:
         failure: ProviderError | None = None
         for _ in range(self.max_attempts):
             try:
-                lease = await self.registry.lease(exclude=tuple(excluded))
+                lease = await self.registry.alease(exclude=tuple(excluded))
             except RegistryError as exc:
                 raise failure or ProviderError("Chave de IA indisponível no registry") from exc
 
@@ -53,7 +54,7 @@ class RegistryImageAnalysisProvider:
                     image, purpose=purpose, title=title, max_alt_chars=max_alt_chars
                 )
             except (ProviderBlocked, ProviderInvalidOutput):
-                await self.registry.report(lease.key_id, "ok")
+                await self.registry.areport(lease.key_id, "ok")
                 raise
             except ProviderError as exc:
                 failure = exc
@@ -63,10 +64,10 @@ class RegistryImageAnalysisProvider:
                 )
                 outcome = _outcome_for(exc.status_code)
                 if outcome:
-                    await self.registry.report(lease.key_id, outcome)
+                    await self.registry.areport(lease.key_id, outcome)
                 continue
 
-            await self.registry.report(lease.key_id, "ok")
+            await self.registry.areport(lease.key_id, "ok")
             return ImageObservation(
                 observation.suggestion,
                 observation.safety_flagged,

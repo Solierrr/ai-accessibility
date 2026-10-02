@@ -5,6 +5,7 @@ from enum import StrEnum
 from typing import Annotated
 from uuid import uuid4
 
+from ai_lib.registry import RegistryClient, RetryPolicy
 from fastapi import FastAPI, File, Form, HTTPException, Security, UploadFile
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
@@ -12,7 +13,6 @@ from src.agents.base.image_analysis_agent import UnavailableImageAnalysisProvide
 from src.api.auth import ApiAuthTokenVerifier
 from src.api.upload_gate import UploadGate
 from src.caption.validation import DEFAULT_ALT_TEXT_CHARS
-from src.clients.registry import RegistryClient, RegistryConfig
 from src.core.config import Settings
 from src.image.validation import MAX_UPLOAD_BYTES
 from src.providers.gemini import ImageAnalysisProvider
@@ -45,11 +45,9 @@ def create_app(
         RegistryImageAnalysisProvider(
             settings,
             RegistryClient(
-                RegistryConfig(
-                    base_url=settings.registry_url or "",
-                    token=settings.registry_token or "",
-                    timeout_seconds=settings.registry_timeout_seconds,
-                )
+                settings.registry_url or "",
+                settings.registry_token or "",
+                policy=RetryPolicy(timeout=settings.registry_timeout_seconds),
             ),
         )
         if settings.registry_configured
