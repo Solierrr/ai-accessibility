@@ -3,18 +3,18 @@ import unittest
 from io import BytesIO
 
 import httpx
+from ai_lib.registry import (
+    KeyLease,
+    RegistryClient,
+    RegistryKeysUnavailable,
+    RetryPolicy,
+)
 from PIL import Image
 
 from src.agents.base.image_analysis_agent import (
     ImageObservation,
     ProviderBlocked,
     ProviderError,
-)
-from src.clients.registry import (
-    NoKeyAvailable,
-    RegistryClient,
-    RegistryConfig,
-    RegistryUnavailable,
 )
 from src.core.config import Settings
 from src.image.validation import validate_image
@@ -28,121 +28,21 @@ def sample_image():
     return validate_image(output.getvalue())
 
 
-def lease_body(key_id: str, provider: str = "gemini") -> dict[str, object]:
-    return {
-        "provider": provider,
-        "key_id": key_id,
-        "api_key": f"secret-{key_id}",
-        "base_url": "https://example.test",
-        "auth_header": {"name": "x", "value": "y"},
-    }
-
-
 class FakeRegistry:
     def __init__(self, leases):
         self.leases = list(leases)
         self.lease_calls: list[tuple[str, ...]] = []
         self.reports: list[tuple[str, str]] = []
 
-    async def lease(self, *, provider=None, purpose=None, exclude=()):
+    async def alease(self, *, provider=None, purpose=None, exclude=()):
         self.lease_calls.append(tuple(exclude))
         item = self.leases.pop(0)
         if isinstance(item, Exception):
             raise item
         return item
 
-    async def report(self, key_id, outcome, retry_after_seconds=None):
+    async def areport(self, key_id, outcome, retry_after_seconds=None):
         self.reports.append((key_id, outcome))
-
-
-def make_client(handler, *, retries=2):
-    sleeps: list[float] = []
-
-    async def sleep(seconds: float) -> None:
-        sleeps.append(seconds)
-
-    client = RegistryClient(
-        RegistryConfig(base_url="http://registry.test", token="tok", retries=retries),
-        transport=httpx.MockTransport(handler),
-        sleep=sleep,
-    )
-    return client, sleeps
-
-
-class RegistryClientTests(unittest.TestCase):
-    def test_lease_sends_token_and_exclusions(self) -> None:
-        seen: list[httpx.Request] = []
-
-        def handler(request: httpx.Request) -> httpx.Response:
-            seen.append(request)
-            return httpx.Response(200, json=lease_body("k1"))
-
-        client, _ = make_client(handler)
-        lease = asyncio.run(client.lease(exclude=("a", "b")))
-        self.assertEqual((lease.provider, lease.key_id, lease.api_key), ("gemini", "k1", "secret-k1"))
-        self.assertEqual(seen[0].headers["authorization"], "Bearer tok")
-        self.assertEqual(seen[0].url.params.get_list("exclude"), ["a", "b"])
-        self.assertNotIn("secret-k1", repr(lease))
-
-    def test_retries_503_with_backoff_then_succeeds(self) -> None:
-        responses = [httpx.Response(503), httpx.Response(503), httpx.Response(200, json=lease_body("k1"))]
-        client, sleeps = make_client(lambda request: responses.pop(0))
-        lease = asyncio.run(client.lease())
-        self.assertEqual(lease.key_id, "k1")
-        self.assertEqual(sleeps, [1.0, 3.0])
-
-    def test_respects_retry_after_from_503(self) -> None:
-        responses = [
-            httpx.Response(503, headers={"Retry-After": "5"}),
-            httpx.Response(200, json=lease_body("k1")),
-        ]
-        client, sleeps = make_client(lambda request: responses.pop(0))
-        asyncio.run(client.lease())
-        self.assertEqual(sleeps, [5.0])
-
-    def test_long_retry_after_fails_without_waiting(self) -> None:
-        client, sleeps = make_client(lambda request: httpx.Response(503, headers={"Retry-After": "60"}))
-        with self.assertRaises(NoKeyAvailable):
-            asyncio.run(client.lease())
-        self.assertEqual(sleeps, [])
-
-    def test_exhausted_retries_with_retry_after_means_no_key(self) -> None:
-        client, _ = make_client(lambda request: httpx.Response(503, headers={"Retry-After": "2"}))
-        with self.assertRaises(NoKeyAvailable):
-            asyncio.run(client.lease())
-
-    def test_unauthorized_and_unreachable_registry_fail_closed(self) -> None:
-        client, sleeps = make_client(lambda request: httpx.Response(401))
-        with self.assertRaises(RegistryUnavailable):
-            asyncio.run(client.lease())
-        self.assertEqual(sleeps, [])
-
-        def unreachable(request: httpx.Request) -> httpx.Response:
-            raise httpx.ConnectError("down")
-
-        client, sleeps = make_client(unreachable)
-        with self.assertRaises(RegistryUnavailable):
-            asyncio.run(client.lease())
-        self.assertEqual(sleeps, [1.0, 3.0])
-
-    def test_not_configured_registry_is_no_key(self) -> None:
-        client, _ = make_client(lambda request: httpx.Response(404))
-        with self.assertRaises(NoKeyAvailable):
-            asyncio.run(client.lease())
-
-    def test_report_posts_outcome_and_never_raises(self) -> None:
-        seen: list[httpx.Request] = []
-
-        def handler(request: httpx.Request) -> httpx.Response:
-            seen.append(request)
-            return httpx.Response(500)
-
-        client, sleeps = make_client(handler)
-        asyncio.run(client.report("k1", "rate_limited"))
-        self.assertEqual(seen[0].url.path, "/v1/llm/keys/k1/report")
-        self.assertEqual(seen[0].content, b'{"outcome":"rate_limited"}')
-        self.assertEqual(len(seen), 1)
-        self.assertEqual(sleeps, [])
 
 
 class FakeInnerProvider:
@@ -211,15 +111,70 @@ class RegistryProviderTests(unittest.TestCase):
         self.assertEqual(registry.reports, [("k1", "ok")])
 
     def test_registry_down_is_provider_error(self) -> None:
-        registry = FakeRegistry([RegistryUnavailable("down")])
+        registry = FakeRegistry([RegistryKeysUnavailable("down")])
         with self.assertRaises(ProviderError):
             self.run_analysis(self.provider(registry, []))
 
 
-def _lease(key_id: str):
-    from src.clients.registry import KeyLease
+class RegistryWiringTests(unittest.TestCase):
+    """O provider conversa com o corretor pelo cliente real da solaria-lib."""
 
-    return KeyLease(provider="gemini", key_id=key_id, api_key=f"secret-{key_id}")
+    def lease_json(self, key_id: str) -> dict[str, object]:
+        return {
+            "provider": "gemini",
+            "key_id": key_id,
+            "api_key": f"secret-{key_id}",
+            "base_url": "https://example.test",
+            "auth_header": {"name": "x", "value": "y"},
+        }
+
+    def test_leases_with_exclusion_and_reports_through_the_lib_client(self) -> None:
+        seen: list[httpx.Request] = []
+        leases = [self.lease_json("k1"), self.lease_json("k2")]
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            seen.append(request)
+            if request.url.path.endswith("/report"):
+                return httpx.Response(204)
+            return httpx.Response(200, json=leases.pop(0))
+
+        registry = RegistryClient(
+            "http://registry.test",
+            "tok",
+            policy=RetryPolicy(timeout=5),
+            async_transport=httpx.MockTransport(handler),
+        )
+        settings = Settings(registry_url="http://registry.test", registry_token="tok")
+        provider = RegistryImageAnalysisProvider(settings, registry)
+        outcomes = [
+            ProviderError("x", status_code=429),
+            ImageObservation(ImageAnalysisSuggestion.model_construct(), safety_flagged=False),
+        ]
+        provider._provider_for = lambda lease: FakeInnerProvider(outcomes)
+
+        asyncio.run(provider.analyze(sample_image(), purpose="product", title="", max_alt_chars=150))
+
+        lease_calls = [r for r in seen if r.url.path == "/v1/llm/keys"]
+        self.assertEqual(lease_calls[0].headers["authorization"], "Bearer tok")
+        self.assertEqual(lease_calls[1].url.params.get_list("exclude"), ["k1"])
+        reports = [(r.url.path, r.content) for r in seen if r.url.path.endswith("/report")]
+        self.assertEqual(
+            reports,
+            [
+                ("/v1/llm/keys/k1/report", b'{"outcome":"rate_limited"}'),
+                ("/v1/llm/keys/k2/report", b'{"outcome":"ok"}'),
+            ],
+        )
+
+
+def _lease(key_id: str):
+    return KeyLease(
+        provider="gemini",
+        key_id=key_id,
+        api_key=f"secret-{key_id}",
+        base_url="https://example.test",
+        auth_header={"name": "x", "value": "y"},
+    )
 
 
 if __name__ == "__main__":

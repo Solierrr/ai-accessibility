@@ -45,7 +45,7 @@ API interna para analisar imagens enviadas ao Solaria, identificar conteúdo ina
 | **LangGraph** | Orquestra validação, análise multimodal e decisão em um grafo com rotas explícitas. |
 | **Pydantic** | Valida os sinais estruturados retornados pelos provedores e modela a resposta da API. |
 | **Pillow** | Valida a imagem, corrige a orientação EXIF, remove metadados e gera JPEG RGB de até 800 × 800 pixels com qualidade 85 antes da IA. |
-| **Gemini e GroqCloud** | Analisam o conteúdo visual e geram a legenda; o provedor e a chave vêm do `google-registry`, com troca de chave em falhas técnicas. |
+| **Gemini e GroqCloud** | Analisam o conteúdo visual e geram a legenda; o provedor e a chave vêm do `google-registry` (cliente da lib `solaria-lib`), com troca de chave em falhas técnicas. |
 | **Uvicorn** | Executa a aplicação FastAPI como servidor HTTP. |
 | **Docker** | Empacota o serviço e suas dependências para execução em contêiner. |
 
@@ -83,7 +83,7 @@ O `web-app` ainda não tem upload conectado a esta API. Para testar agora, envie
 
 Para teste local, execute o `api-auth` com seu JWKS público em `http://localhost:8081/.well-known/jwks.json` e obtenha um `accessToken` por `POST /auth/login`. Configure `JWT_JWK_SET_URI` se a URL for diferente e `JWT_ISSUER` se o emissor não for `solaria-auth`. Esta API valida a assinatura RS256, o emissor, a expiração, o tipo `access` e as identidades de usuário e sessão. Se o JWKS estiver indisponível, responde 503 sem processar a imagem. Como a verificação é local, revogação de sessão ou bloqueio da conta no `api-auth` só passam a valer aqui quando o access token expirar; a integração com uma verificação online de sessão ainda não está definida.
 
-As chaves de IA vêm do `google-registry`: configure `GOOGLE_REGISTRY_URL` e `REGISTRY_CONSUMER_TOKEN`. A cada análise o serviço pede uma chave (Gemini ou GroqCloud, conforme o rodízio do registry), avisa o resultado de uso e, em falha técnica ou limite de uso, troca por outra chave (até `REGISTRY_MAX_ATTEMPTS`, padrão 3). Com o registry indisponível a análise falha de modo conservador com `PROVIDER_UNAVAILABLE`. Com `GROQ_MODEL` vazio, usa `qwen/qwen3.8-27b`. GroqCloud e xAI/Grok são serviços diferentes.
+As chaves de IA vêm do `google-registry`: configure `GOOGLE_REGISTRY_URL` e `REGISTRY_CONSUMER_TOKEN` (em QA o `entrypoint.sh` as carrega do Infisical, pasta `/service-urls`, a partir de `INFISICAL_CLIENT_ID`, `INFISICAL_CLIENT_SECRET` e `INFISICAL_ENV`). A cada análise o serviço pede uma chave (Gemini ou GroqCloud, conforme o rodízio do registry), avisa o resultado de uso e, em falha técnica ou limite de uso, troca por outra chave (até `REGISTRY_MAX_ATTEMPTS`, padrão 3). Com o registry indisponível a análise falha de modo conservador com `PROVIDER_UNAVAILABLE`. Com `GROQ_MODEL` vazio, usa `qwen/qwen3.8-27b`. GroqCloud e xAI/Grok são serviços diferentes.
 
 Uma aprovação é apenas um resultado da análise. O backend que futuramente receberá o upload deve manter o arquivo privado até o autor confirmar o texto alternativo e o sistema concluir a publicação.
 
