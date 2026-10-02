@@ -1,5 +1,3 @@
-"""Verificações locais de uma sugestão de texto alternativo."""
-
 import re
 
 from src.moderation.models import CaptionSuggestion
