@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.0](https://github.com/Solierrr/ai-accessibility/compare/v0.2.0...v0.3.0) (2026-10-09)
+
+
+### Features
+
+* add the local run commands ([03050ad](https://github.com/Solierrr/ai-accessibility/commit/03050ad307eaf8d9a5fdb33b9ebff0581733ba96))
+
 ## [0.2.0](https://github.com/Solierrr/ai-accessibility/compare/v0.1.0...v0.2.0) (2026-09-30)
 
 
