@@ -3,7 +3,7 @@
 # Requer: make e sh (Git Bash no Windows). Para `make vault`: Infisical CLI e `infisical login`.
 
 # ---- especifico deste repositorio ----
-VAULT_FOLDERS ?=
+VAULT_FOLDERS ?= /llm
 ifeq ($(OS),Windows_NT)
 PY ?= .venv/Scripts/python
 else
