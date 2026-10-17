@@ -33,7 +33,7 @@ A resposta inclui `analysis_id`, `request_id`, `decision`, `reason_codes`, `risk
 
 ## Configuração e execução local
 
-Use `.env.example` como referência. Configure `INTERNAL_API_TOKEN` e pelo menos uma chave de provedor: `GEMINI_AI_ACCESSIBILITY_KEY` ou `GROQ_AI_ACCESSIBILITY_KEY`. `GOOGLE_API_KEY` é um nome legado aceito como fallback para a chave Gemini. `GEMINI_MODEL` e `GROQ_MODEL` definem os modelos; o padrão do GroqCloud é `qwen/qwen3.8-27b`. GroqCloud não é xAI/Grok. As configurações também incluem timeout e concorrência. Nunca copie credenciais para documentação ou código.
+Use `.env.example` como referência. Configure `INTERNAL_API_TOKEN` e pelo menos uma chave de provedor: `GEMINI_API_KEY` ou `GROQ_API_KEY` (os nomes `GEMINI_AI_ACCESSIBILITY_KEY`, `GOOGLE_API_KEY` e `GROQ_AI_ACCESSIBILITY_KEY` seguem aceitos como legados). `GEMINI_MODEL` e `GROQ_MODEL` definem os modelos; o padrão do GroqCloud é `qwen/qwen3.8-27b`. GroqCloud não é xAI/Grok. As configurações também incluem timeout e concorrência. Nunca copie credenciais para documentação ou código.
 
 No ambiente virtual local, execute `./.venv/Scripts/python.exe -m uvicorn src.api.app:app --host 127.0.0.1 --port 8080` no PowerShell. Consulte `http://127.0.0.1:8080/docs` para a API e `GET /health` para verificar a configuração. No Swagger, informe somente o valor do token em **Authorize**; em clientes HTTP, envie `Bearer <token>`. Reinicie o processo após alterar `.env`. O `Dockerfile` também executa o serviço na porta 8080.
 
