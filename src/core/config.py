@@ -34,8 +34,11 @@ class Settings:
         if timeout <= 0 or not 1 <= concurrency <= 32:
             raise ValueError("Configuração de timeout ou concorrência inválida")
         return cls(
+            # Nomes compartilhados com os demais serviços (uma chave por provedor); os nomes
+            # antigos continuam aceitos.
             google_api_key=(
-                os.getenv("GEMINI_AI_ACCESSIBILITY_KEY")
+                os.getenv("GEMINI_API_KEY")
+                or os.getenv("GEMINI_AI_ACCESSIBILITY_KEY")
                 or os.getenv("GOOGLE_API_KEY")
                 or None
             ),
@@ -43,7 +46,9 @@ class Settings:
             gemini_model=model,
             gemini_timeout_seconds=timeout,
             max_concurrent_analyses=concurrency,
-            groq_api_key=os.getenv("GROQ_AI_ACCESSIBILITY_KEY") or None,
+            groq_api_key=(
+                os.getenv("GROQ_API_KEY") or os.getenv("GROQ_AI_ACCESSIBILITY_KEY") or None
+            ),
             groq_model=groq_model,
         )
 
