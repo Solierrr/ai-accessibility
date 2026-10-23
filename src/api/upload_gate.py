@@ -7,6 +7,8 @@ from starlette.responses import JSONResponse
 from src.image.validation import MAX_UPLOAD_BYTES
 
 MAX_REQUEST_BYTES = MAX_UPLOAD_BYTES + 256 * 1024  # margem para campos multipart
+ANALYZE_PATH = "/v1/images/analyze"
+DEBUG_ANALYZE_PATH = "/debug/images/analyze"
 
 
 class UploadGate:
@@ -15,22 +17,27 @@ class UploadGate:
         self.token = token
 
     async def __call__(self, scope, receive, send) -> None:
-        if scope["type"] != "http" or scope["path"] != "/v1/images/analyze":
+        if scope["type"] != "http" or scope["path"] not in (
+            ANALYZE_PATH,
+            DEBUG_ANALYZE_PATH,
+        ):
             await self.app(scope, receive, send)
             return
 
-        if not self.token:
-            await JSONResponse(
-                {"detail": "Autenticação interna não configurada"}, status_code=503
-            )(scope, receive, send)
-            return
         headers = dict(scope.get("headers", []))
-        expected = b"Bearer " + self.token.encode("utf-8")
-        if not hmac.compare_digest(headers.get(b"authorization", b""), expected):
-            await JSONResponse(
-                {"detail": "Credencial interna inválida"}, status_code=401
-            )(scope, receive, send)
-            return
+       
+        if scope["path"] == ANALYZE_PATH:
+            if not self.token:
+                await JSONResponse(
+                    {"detail": "Autenticação interna não configurada"}, status_code=503
+                )(scope, receive, send)
+                return
+            expected = b"Bearer " + self.token.encode("utf-8")
+            if not hmac.compare_digest(headers.get(b"authorization", b""), expected):
+                await JSONResponse(
+                    {"detail": "Credencial interna inválida"}, status_code=401
+                )(scope, receive, send)
+                return
 
         try:
             declared = int(headers.get(b"content-length", b"0"))
