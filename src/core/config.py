@@ -19,6 +19,10 @@ class Settings:
     max_concurrent_analyses: int = 4
     groq_api_key: str | None = None
     groq_model: str = "qwen/qwen3.8-27b"
+    environment: str = "LOCAL"
+    debug_admin_subs: str = ""
+    jwt_jwks_url: str | None = None
+    jwt_issuer: str | None = None
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -50,6 +54,10 @@ class Settings:
                 os.getenv("GROQ_API_KEY") or os.getenv("GROQ_AI_ACCESSIBILITY_KEY") or None
             ),
             groq_model=groq_model,
+            environment=os.getenv("ENVIRONMENT") or "LOCAL",
+            debug_admin_subs=os.getenv("DEBUG_ADMIN_SUBS", ""),
+            jwt_jwks_url=os.getenv("JWT_JWKS_URL") or None,
+            jwt_issuer=os.getenv("JWT_ISSUER") or None,
         )
 
     @property
