@@ -47,6 +47,8 @@ O `web-app` ainda não tem upload conectado a esta API. Para testar agora, envie
 
 Configure a chave Gemini em `GEMINI_API_KEY` (a mesma dos demais serviços; `GEMINI_AI_ACCESSIBILITY_KEY` e `GOOGLE_API_KEY` ainda funcionam como nomes legados, nessa ordem de prioridade). `GROQ_API_KEY` (ou o legado `GROQ_AI_ACCESSIBILITY_KEY`) ativa o GroqCloud como fallback em falhas técnicas. Com `GROQ_MODEL` vazio, usa `qwen/qwen3.8-27b`. GroqCloud e xAI/Grok são serviços diferentes.
 
+`POST /debug/images/analyze` é o modo debug para administradores (JWT de admin, não o token interno): devolve a resposta normal mais as etapas da análise, só com metadados. Fica fora do Swagger; veja [docs/debug-endpoint.md](docs/debug-endpoint.md).
+
 Uma aprovação é apenas um resultado da análise. O backend que futuramente receberá o upload deve manter o arquivo privado até o autor confirmar o texto alternativo e o sistema concluir a publicação.
 
 Na resposta, `risk_categories` lista categorias de risco identificadas. Lista vazia junto de `PROVIDER_UNAVAILABLE` não comprova que a imagem seja segura.
