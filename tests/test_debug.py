@@ -3,16 +3,15 @@
 import asyncio
 import json
 import unittest
-from io import BytesIO
 from unittest.mock import patch
 
 import httpx
-from PIL import Image
 
 from src.api.app import create_app
 from src.core.config import Settings
-from src.moderation.models import CaptionSuggestion, VisionAssessment
-from src.providers.gemini import ModerationObservation, ProviderBlocked, ProviderError
+from src.providers.gemini import ProviderBlocked, ProviderError
+from tests.test_analysis import FakeProvider as BaseProvider
+from tests.test_analysis import assessment, valid_image
 
 ADMIN = "11111111-1111-4111-8111-111111111111"
 OUTRO = "22222222-2222-4222-8222-222222222222"
@@ -22,48 +21,24 @@ CAPTION = "Painel solar azul sobre uma mesa."
 DEBUG = "/debug/images/analyze"
 
 
-def valid_image() -> bytes:
-    output = BytesIO()
-    Image.new("RGB", (4, 4), "blue").save(output, format="PNG")
-    return output.getvalue()
+class FakeProvider(BaseProvider):
+    """Provedor falso com versão própria e falha de moderação configurável."""
 
-
-def assessment(**overrides: object) -> VisionAssessment:
-    data = {
-        "sexual_content": "none",
-        "graphic_violence": "none",
-        "hateful_content": "none",
-        "offensive_text": "none",
-        "context": "ordinary",
-        "confidence": "high",
-        "prompt_injection": False,
-        "uncertain": False,
-    }
-    data.update(overrides)
-    return VisionAssessment.model_validate(data)
-
-
-class FakeProvider:
     def __init__(
         self,
         model_version: str = "test/fake",
         *,
-        visual: VisionAssessment | None = None,
+        visual=None,
         moderation_error: ProviderError | None = None,
     ) -> None:
+        super().__init__(visual=visual)
         self.model_version = model_version
-        self.visual = visual or assessment()
         self.moderation_error = moderation_error
-        self.caption_calls = 0
 
     async def moderate(self, image):
         if self.moderation_error is not None:
             raise self.moderation_error
-        return ModerationObservation(self.visual, False)
-
-    async def caption(self, image, *, purpose, title, max_alt_chars):
-        self.caption_calls += 1
-        return CaptionSuggestion(alt_text=CAPTION, uncertain=False)
+        return await super().moderate(image)
 
 
 def fake_decode(token: str, *, jwks_url: str, issuer: str) -> str | None:
@@ -110,7 +85,9 @@ def post_debug(
 
 class AccessTests(unittest.TestCase):
     def test_without_admins_the_route_does_not_exist(self) -> None:
-        self.assertEqual(post_debug(make_settings(debug_admin_subs="")).status_code, 404)
+        self.assertEqual(
+            post_debug(make_settings(debug_admin_subs="")).status_code, 404
+        )
 
     def test_environment_must_be_allowed(self) -> None:
         for environment in ("PRD", "staging", ""):
@@ -147,7 +124,9 @@ class AccessTests(unittest.TestCase):
 
     def test_route_is_not_in_the_openapi(self) -> None:
         app = create_app(make_settings(), FakeProvider())
-        self.assertFalse(any(path.startswith("/debug") for path in app.openapi()["paths"]))
+        self.assertFalse(
+            any(path.startswith("/debug") for path in app.openapi()["paths"])
+        )
 
     def test_oversized_upload_is_rejected_with_413(self) -> None:
         response = post_debug(make_settings(), content=b"0" * (9 * 1024 * 1024))
@@ -167,7 +146,13 @@ class StepTests(unittest.TestCase):
         self.assertEqual(body["decision"], "approved")
         self.assertEqual(
             [step["stage"] for step in body["debug"]["steps"]],
-            ["image_validation", "moderation", "policy", "caption", "caption_validation"],
+            [
+                "image_validation",
+                "moderation",
+                "policy",
+                "caption",
+                "caption_validation",
+            ],
         )
         self.assertFalse(body["debug"]["persisted"])
         self.assertEqual(body["debug"]["environment"], "QA")
@@ -198,7 +183,9 @@ class StepTests(unittest.TestCase):
             "test/primary", moderation_error=ProviderError("falha", status_code=503)
         )
 
-        response = post_debug(make_settings(), primary, fallback=FakeProvider("test/fallback"))
+        response = post_debug(
+            make_settings(), primary, fallback=FakeProvider("test/fallback")
+        )
 
         moderation = [s for s in self.steps(response) if s["stage"] == "moderation"]
         self.assertEqual([s["outcome"] for s in moderation], ["error", "ok"])

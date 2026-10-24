@@ -25,7 +25,7 @@ class UploadGate:
             return
 
         headers = dict(scope.get("headers", []))
-       
+
         if scope["path"] == ANALYZE_PATH:
             if not self.token:
                 await JSONResponse(

@@ -1,7 +1,6 @@
 """Orquestra etapas, sempre falhando para revisão ou rejeição."""
 
 import logging
-
 from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict

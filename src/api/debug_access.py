@@ -34,9 +34,9 @@ def decode_user_id(token: str, *, jwks_url: str, issuer: str) -> str | None:
     try:
         client = _clients.setdefault(jwks_url, PyJWKClient(jwks_url))
         key = client.get_signing_key_from_jwt(token)
-        return pyjwt.decode(
-            token, key.key, algorithms=["RS256"], issuer=issuer
-        ).get("sub")
+        return pyjwt.decode(token, key.key, algorithms=["RS256"], issuer=issuer).get(
+            "sub"
+        )
     except Exception:  # noqa: BLE001 - qualquer falha nega o acesso
         return None
 

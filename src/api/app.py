@@ -61,6 +61,36 @@ def create_app(
     async def health() -> dict[str, object]:
         return {"status": "ready" if settings.ready else "not_configured"}
 
+    async def run_analysis(
+        image: UploadFile,
+        purpose: Purpose,
+        max_alt_chars: int,
+        request_id: str,
+        context_title: str,
+        trace: StepRecorder | None = None,
+    ) -> AnalysisResponse:
+        """Parte comum às rotas `analyze` e `debug_analyze`, depois da autenticação."""
+        if not (settings.google_api_key or settings.groq_api_key):
+            raise HTTPException(
+                status_code=503, detail="Provedor de visão não configurado"
+            )
+        if request_id and not re.fullmatch(r"[A-Za-z0-9._:-]{1,100}", request_id):
+            raise HTTPException(status_code=422, detail="request_id inválido")
+
+        content = await image.read(MAX_UPLOAD_BYTES + 1)
+        await image.close()
+        async with semaphore:
+            return await analyze_image(
+                content,
+                provider=provider,
+                fallback_provider=fallback_provider,
+                request_id=request_id or str(uuid4()),
+                purpose=purpose.value,
+                max_alt_chars=max_alt_chars,
+                context_title=context_title,
+                trace=trace,
+            )
+
     @application.post("/v1/images/analyze", response_model=AnalysisResponse)
     async def analyze(
         image: Annotated[UploadFile, File()],
@@ -79,27 +109,9 @@ def create_app(
         supplied = credentials.credentials if credentials else ""
         if not hmac.compare_digest(supplied, settings.internal_api_token):
             raise HTTPException(status_code=401, detail="Credencial interna inválida")
-        if not (settings.google_api_key or settings.groq_api_key):
-            raise HTTPException(
-                status_code=503, detail="Provedor de visão não configurado"
-            )
-        if request_id and not re.fullmatch(r"[A-Za-z0-9._:-]{1,100}", request_id):
-            raise HTTPException(status_code=422, detail="request_id inválido")
-
-        # Leitura limitada. O proxy HTTP de produção também deve limitar o corpo da requisição.
-        content = await image.read(MAX_UPLOAD_BYTES + 1)
-        await image.close()
-        correlation = request_id or str(uuid4())
-        async with semaphore:
-            response = await analyze_image(
-                content,
-                provider=provider,
-                fallback_provider=fallback_provider,
-                request_id=correlation,
-                purpose=purpose.value,
-                max_alt_chars=max_alt_chars,
-                context_title=context_title,
-            )
+        response = await run_analysis(
+            image, purpose, max_alt_chars, request_id, context_title
+        )
         logger.info(
             "image_analysis analysis_id=%s request_id=%s decision=%s reasons=%s",
             response.analysis_id,
@@ -109,11 +121,7 @@ def create_app(
         )
         return response
 
-    @application.post(
-        "/debug/images/analyze",
-        response_model=DebugAnalysisResponse,
-        include_in_schema=False,
-    )
+    @application.post("/debug/images/analyze", include_in_schema=False)
     async def debug_analyze(
         image: Annotated[UploadFile, File()],
         purpose: Annotated[Purpose, Form()],
@@ -128,27 +136,10 @@ def create_app(
         logger.info(
             "Execução de debug (sub=%s, ambiente=%s)", sub, settings.environment
         )
-        if not (settings.google_api_key or settings.groq_api_key):
-            raise HTTPException(
-                status_code=503, detail="Provedor de visão não configurado"
-            )
-        if request_id and not re.fullmatch(r"[A-Za-z0-9._:-]{1,100}", request_id):
-            raise HTTPException(status_code=422, detail="request_id inválido")
-
-        content = await image.read(MAX_UPLOAD_BYTES + 1)
-        await image.close()
         recorder = StepRecorder()
-        async with semaphore:
-            response = await analyze_image(
-                content,
-                provider=provider,
-                fallback_provider=fallback_provider,
-                request_id=request_id or str(uuid4()),
-                purpose=purpose.value,
-                max_alt_chars=max_alt_chars,
-                context_title=context_title,
-                trace=recorder,
-            )
+        response = await run_analysis(
+            image, purpose, max_alt_chars, request_id, context_title, recorder
+        )
         debug = recorder.snapshot()
         debug["environment"] = settings.environment
         debug["persisted"] = False
