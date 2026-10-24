@@ -188,7 +188,8 @@ class ApiTests(unittest.TestCase):
             self.assertNotIn("locale", body_schema["properties"])
             self.assertIn("max_alt_chars", body_schema["properties"])
             self.assertNotIn(
-                "authorization", [item["name"] for item in operation.get("parameters", [])]
+                "authorization",
+                [item["name"] for item in operation.get("parameters", [])],
             )
             async with httpx.AsyncClient(
                 transport=httpx.ASGITransport(app=app), base_url="http://test"
