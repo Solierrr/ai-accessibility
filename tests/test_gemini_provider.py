@@ -26,7 +26,9 @@ class GeminiProviderTests(unittest.TestCase):
         def handle(request: httpx.Request) -> httpx.Response:
             body = json.loads(request.content)
             prompts.append(body["contents"][0]["parts"][0]["text"])
-            caption = "Painéis solares sobre telhado" if len(prompts) == 1 else "Painel sol"
+            caption = (
+                "Painéis solares sobre telhado" if len(prompts) == 1 else "Painel sol"
+            )
             return httpx.Response(
                 200,
                 json={
@@ -48,8 +50,12 @@ class GeminiProviderTests(unittest.TestCase):
             )
 
         async def run() -> None:
-            async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as client:
-                provider = GeminiVisionProvider(Settings("test-key", "test-secret"), client)
+            async with httpx.AsyncClient(
+                transport=httpx.MockTransport(handle)
+            ) as client:
+                provider = GeminiVisionProvider(
+                    Settings("test-key", "test-secret"), client
+                )
                 suggestion = await provider.caption(
                     sample_image(), purpose="product", title="", max_alt_chars=10
                 )

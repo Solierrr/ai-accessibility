@@ -47,11 +47,15 @@ class Settings:
             gemini_timeout_seconds=timeout,
             max_concurrent_analyses=concurrency,
             groq_api_key=(
-                os.getenv("GROQ_API_KEY") or os.getenv("GROQ_AI_ACCESSIBILITY_KEY") or None
+                os.getenv("GROQ_API_KEY")
+                or os.getenv("GROQ_AI_ACCESSIBILITY_KEY")
+                or None
             ),
             groq_model=groq_model,
         )
 
     @property
     def ready(self) -> bool:
-        return bool((self.google_api_key or self.groq_api_key) and self.internal_api_token)
+        return bool(
+            (self.google_api_key or self.groq_api_key) and self.internal_api_token
+        )

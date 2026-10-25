@@ -1,7 +1,6 @@
 """Orquestra etapas, sempre falhando para revisão ou rejeição."""
 
 import logging
-
 from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict
@@ -14,9 +13,7 @@ from src.providers.gemini import ProviderBlocked, ProviderError, VisionProvider
 logger = logging.getLogger(__name__)
 
 
-def log_provider_failure(
-    provider_name: str, stage: str, exc: ProviderError
-) -> None:
+def log_provider_failure(provider_name: str, stage: str, exc: ProviderError) -> None:
     """Registra somente metadados seguros; nunca imagem, prompt ou resposta bruta."""
     cause_type = type(exc.__cause__).__name__ if exc.__cause__ else "none"
     logger.warning(
