@@ -6,7 +6,13 @@
   "packages": {
     ".": {
       "release-type": "simple",
-      "package-name": "ai-accessibility"
+      "package-name": "ai-accessibility",
+      "extra-files": [
+        {
+          "type": "generic",
+          "path": "openapi.yaml"
+        }
+      ]
     }
   }
 }

@@ -298,6 +298,38 @@ class ApiTests(unittest.TestCase):
         asyncio.run(run())
 
 
+class OpenApiTests(unittest.TestCase):
+    def test_contract_follows_the_standard(self) -> None:
+        contract = create_app(Settings(google_api_key="test-key")).openapi()
+        self.assertEqual(contract["info"]["title"], "Solaria — ai-accessibility")
+        self.assertEqual(contract["info"]["version"], VERSION)
+        self.assertEqual(contract["servers"][0]["description"], "QA")
+        self.assertEqual(contract["security"], [{"serviceKey": []}])
+        self.assertIn("ProblemDetail", contract["components"]["schemas"])
+        self.assertNotIn("HTTPValidationError", contract["components"]["schemas"])
+        analyze = contract["paths"]["/v1/images/analyze"]["post"]
+        self.assertEqual(analyze["operationId"], "analyzeImage")
+        for code in ("401", "413", "422", "500", "503"):
+            self.assertIn(
+                "application/problem+json", analyze["responses"][code]["content"]
+            )
+        self.assertEqual(contract["paths"]["/health"]["get"]["security"], [])
+        ready = contract["paths"]["/ready"]["get"]["responses"]["503"]
+        self.assertIn("application/json", ready["content"])
+
+    def test_docs_can_be_disabled(self) -> None:
+        async def run() -> tuple[int, int]:
+            app = create_app(Settings(google_api_key="test-key", docs_enabled=False))
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=app), base_url="http://test"
+            ) as client:
+                docs = await client.get("/docs")
+                contract = await client.get("/openapi.json")
+                return docs.status_code, contract.status_code
+
+        self.assertEqual(asyncio.run(run()), (404, 404))
+
+
 class HealthTests(unittest.TestCase):
     def test_health_and_readiness(self) -> None:
         async def check(settings: Settings) -> tuple[httpx.Response, httpx.Response]:

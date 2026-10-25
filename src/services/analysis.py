@@ -3,7 +3,7 @@
 import logging
 from uuid import uuid4
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from src.caption.validation import DEFAULT_ALT_TEXT_CHARS, validated_alt_text
 from src.image.validation import ImageValidationError, validate_image
@@ -28,14 +28,26 @@ def log_provider_failure(provider_name: str, stage: str, exc: ProviderError) -> 
 class AnalysisResponse(BaseModel):
     model_config = ConfigDict(use_enum_values=True)
 
-    analysis_id: str
-    request_id: str
-    decision: Decision
-    reason_codes: list[str]
-    risk_categories: list[str]
-    alt_text: str | None
-    policy_version: str
-    model_version: str
+    analysis_id: str = Field(
+        description="Id da análise.", examples=["0b6f3c1e-2d4a-4f7e-9c1a-5e8d7b2a1f30"]
+    )
+    request_id: str = Field(
+        description="Id de correlação recebido ou gerado.", examples=["upload-1"]
+    )
+    decision: Decision = Field(description="Resultado da análise.")
+    reason_codes: list[str] = Field(
+        description="Motivos da decisão; vazio quando aprovada.",
+        examples=[["PROVIDER_UNAVAILABLE"]],
+    )
+    risk_categories: list[str] = Field(
+        description="Categorias de risco identificadas.", examples=[[]]
+    )
+    alt_text: str | None = Field(
+        description="Texto alternativo sugerido, só quando aprovada.",
+        examples=["Painel solar azul sobre uma mesa."],
+    )
+    policy_version: str = Field(description="Versão da política de moderação.")
+    model_version: str = Field(description="Modelos usados na análise.")
 
 
 async def analyze_image(

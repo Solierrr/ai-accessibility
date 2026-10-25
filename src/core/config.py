@@ -11,6 +11,7 @@ from dotenv import load_dotenv
 _MODEL_PATTERN = re.compile(r"^[A-Za-z0-9._-]+$")
 SERVICE_CALLERS: tuple[str, ...] = ()
 MIN_SERVICE_KEY_LENGTH = 32
+DEFAULT_CORS_ALLOWED_ORIGINS = "http://localhost:3000,http://localhost:5173"
 
 
 def service_key_variable(caller: str) -> str:
@@ -26,6 +27,10 @@ class Settings:
     max_concurrent_analyses: int = 4
     groq_api_key: str | None = None
     groq_model: str = "qwen/qwen3.8-27b"
+    docs_enabled: bool = True
+    cors_allowed_origins: tuple[str, ...] = tuple(
+        DEFAULT_CORS_ALLOWED_ORIGINS.split(",")
+    )
 
     def __post_init__(self) -> None:
         for caller, key in self.service_keys.items():
@@ -71,6 +76,14 @@ class Settings:
                 or None
             ),
             groq_model=groq_model,
+            docs_enabled=os.getenv("DOCS_ENABLED", "true").strip().lower() != "false",
+            cors_allowed_origins=tuple(
+                origin.strip()
+                for origin in (
+                    os.getenv("CORS_ALLOWED_ORIGINS") or DEFAULT_CORS_ALLOWED_ORIGINS
+                ).split(",")
+                if origin.strip()
+            ),
         )
 
     @property
