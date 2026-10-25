@@ -18,6 +18,7 @@ from src.image.validation import MAX_UPLOAD_BYTES
 from src.providers.gemini import GeminiVisionProvider, VisionProvider
 from src.providers.groq import GroqVisionProvider
 from src.services.analysis import AnalysisResponse, analyze_image
+from src.version import VERSION
 
 logger = logging.getLogger(__name__)
 bearer_scheme = HTTPBearer(
@@ -47,7 +48,7 @@ def create_app(
     if fallback_provider is None and settings.google_api_key and settings.groq_api_key:
         fallback_provider = GroqVisionProvider(settings)
     semaphore = asyncio.Semaphore(settings.max_concurrent_analyses)
-    application = FastAPI(title="Solaria AI Accessibility", version="0.1.0")
+    application = FastAPI(title="Solaria AI Accessibility", version=VERSION)
     application.add_middleware(UploadGate, token=settings.internal_api_token)
 
     @application.get("/health")
