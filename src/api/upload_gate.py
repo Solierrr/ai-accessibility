@@ -2,11 +2,16 @@
 
 import hmac
 
-from starlette.responses import JSONResponse
-
+from src.api.errors import problem_response
 from src.image.validation import MAX_UPLOAD_BYTES
 
 MAX_REQUEST_BYTES = MAX_UPLOAD_BYTES + 256 * 1024  # margem para campos multipart
+
+
+async def _too_large(scope, receive, send) -> None:
+    await problem_response(
+        scope["path"], 413, "PAYLOAD_TOO_LARGE", "Upload excede o limite."
+    )(scope, receive, send)
 
 
 class UploadGate:
@@ -20,15 +25,18 @@ class UploadGate:
             return
 
         if not self.token:
-            await JSONResponse(
-                {"detail": "Autenticação interna não configurada"}, status_code=503
+            await problem_response(
+                scope["path"],
+                503,
+                "DEPENDENCY_UNAVAILABLE",
+                "Autenticação interna não configurada.",
             )(scope, receive, send)
             return
         headers = dict(scope.get("headers", []))
         expected = b"Bearer " + self.token.encode("utf-8")
         if not hmac.compare_digest(headers.get(b"authorization", b""), expected):
-            await JSONResponse(
-                {"detail": "Credencial interna inválida"}, status_code=401
+            await problem_response(
+                scope["path"], 401, "UNAUTHENTICATED", "Credencial interna inválida."
             )(scope, receive, send)
             return
 
@@ -37,9 +45,7 @@ class UploadGate:
         except ValueError:
             declared = MAX_REQUEST_BYTES + 1
         if declared > MAX_REQUEST_BYTES:
-            await JSONResponse({"detail": "Upload excede o limite"}, status_code=413)(
-                scope, receive, send
-            )
+            await _too_large(scope, receive, send)
             return
 
         messages = []
@@ -52,9 +58,7 @@ class UploadGate:
                 continue
             total += len(message.get("body", b""))
             if total > MAX_REQUEST_BYTES:
-                await JSONResponse(
-                    {"detail": "Upload excede o limite"}, status_code=413
-                )(scope, receive, send)
+                await _too_large(scope, receive, send)
                 return
             messages.append(message)
             if not message.get("more_body", False):

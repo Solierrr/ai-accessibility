@@ -203,6 +203,11 @@ class ApiTests(unittest.TestCase):
                     "/v1/images/analyze", data=payload, files=files
                 )
                 self.assertEqual(unauthorized.status_code, 401)
+                self.assertEqual(
+                    unauthorized.headers["content-type"], "application/problem+json"
+                )
+                self.assertEqual(unauthorized.json()["errorCode"], "UNAUTHENTICATED")
+                self.assertEqual(unauthorized.json()["instance"], "/v1/images/analyze")
 
                 authorized = await client.post(
                     "/v1/images/analyze",
@@ -235,6 +240,11 @@ class ApiTests(unittest.TestCase):
                     headers={"Authorization": "Bearer test-secret"},
                 )
                 self.assertEqual(invalid_limit.status_code, 422)
+                problem = invalid_limit.json()
+                self.assertEqual(problem["type"], "about:blank")
+                self.assertEqual(problem["title"], "VALIDATION_FAILED")
+                self.assertEqual(problem["errors"][0]["field"], "max_alt_chars")
+                self.assertIn("timestamp", problem)
 
                 invalid = await client.post(
                     "/v1/images/analyze",
@@ -254,6 +264,11 @@ class ApiTests(unittest.TestCase):
                     headers={"Authorization": "Bearer test-secret"},
                 )
                 self.assertEqual(too_large.status_code, 413)
+                self.assertEqual(too_large.json()["errorCode"], "PAYLOAD_TOO_LARGE")
+
+                missing = await client.get("/v1/unknown")
+                self.assertEqual(missing.status_code, 404)
+                self.assertEqual(missing.json()["errorCode"], "NOT_FOUND")
 
         asyncio.run(run())
 

@@ -8,9 +8,10 @@ from enum import StrEnum
 from typing import Annotated
 from uuid import uuid4
 
-from fastapi import FastAPI, File, Form, HTTPException, Security, UploadFile
+from fastapi import FastAPI, File, Form, Security, UploadFile
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
+from src.api.errors import ApiError, register_error_handlers
 from src.api.upload_gate import UploadGate
 from src.caption.validation import DEFAULT_ALT_TEXT_CHARS
 from src.core.config import Settings
@@ -49,6 +50,7 @@ def create_app(
         fallback_provider = GroqVisionProvider(settings)
     semaphore = asyncio.Semaphore(settings.max_concurrent_analyses)
     application = FastAPI(title="Solaria AI Accessibility", version=VERSION)
+    register_error_handlers(application)
     application.add_middleware(UploadGate, token=settings.internal_api_token)
 
     @application.get("/health")
@@ -67,18 +69,29 @@ def create_app(
         ] = None,
     ) -> AnalysisResponse:
         if not settings.internal_api_token:
-            raise HTTPException(
-                status_code=503, detail="Autenticação interna não configurada"
+            raise ApiError(
+                503, "DEPENDENCY_UNAVAILABLE", "Autenticação interna não configurada."
             )
         supplied = credentials.credentials if credentials else ""
         if not hmac.compare_digest(supplied, settings.internal_api_token):
-            raise HTTPException(status_code=401, detail="Credencial interna inválida")
+            raise ApiError(401, "UNAUTHENTICATED", "Credencial interna inválida.")
         if not (settings.google_api_key or settings.groq_api_key):
-            raise HTTPException(
-                status_code=503, detail="Provedor de visão não configurado"
+            raise ApiError(
+                503, "DEPENDENCY_UNAVAILABLE", "Provedor de visão não configurado."
             )
         if request_id and not re.fullmatch(r"[A-Za-z0-9._:-]{1,100}", request_id):
-            raise HTTPException(status_code=422, detail="request_id inválido")
+            raise ApiError(
+                422,
+                "VALIDATION_FAILED",
+                "Erro de validação nos campos da requisição.",
+                errors=[
+                    {
+                        "field": "request_id",
+                        "errorCode": "VALIDATION_FAILED",
+                        "detail": "request_id inválido.",
+                    }
+                ],
+            )
 
         # Leitura limitada. O proxy HTTP de produção também deve limitar o corpo da requisição.
         content = await image.read(MAX_UPLOAD_BYTES + 1)
