@@ -15,6 +15,7 @@ from src.moderation.models import CaptionSuggestion, VisionAssessment
 from src.moderation.policy import Decision, decide
 from src.providers.gemini import ModerationObservation, ProviderError
 from src.services.analysis import analyze_image
+from src.version import VERSION
 
 SERVICE_KEY = "k" * 32
 SERVICE_HEADERS = {"X-Service-Key": SERVICE_KEY}
@@ -295,6 +296,24 @@ class ApiTests(unittest.TestCase):
                 self.assertEqual(missing.json()["errorCode"], "NOT_FOUND")
 
         asyncio.run(run())
+
+
+class HealthTests(unittest.TestCase):
+    def test_health_and_readiness(self) -> None:
+        async def check(settings: Settings) -> tuple[httpx.Response, httpx.Response]:
+            app = create_app(settings, FakeProvider())
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=app), base_url="http://test"
+            ) as client:
+                return await client.get("/health"), await client.get("/ready")
+
+        health, ready = asyncio.run(check(Settings(google_api_key="test-key")))
+        self.assertEqual(health.json(), {"status": "UP", "version": VERSION})
+        self.assertEqual((ready.status_code, ready.json()), (200, {"status": "UP"}))
+
+        health, ready = asyncio.run(check(Settings(google_api_key=None)))
+        self.assertEqual(health.status_code, 200)
+        self.assertEqual((ready.status_code, ready.json()), (503, {"status": "DOWN"}))
 
 
 class ServiceKeyTests(unittest.TestCase):

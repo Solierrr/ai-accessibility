@@ -75,4 +75,4 @@ class Settings:
 
     @property
     def ready(self) -> bool:
-        return bool((self.google_api_key or self.groq_api_key) and self.service_keys)
+        return bool(self.google_api_key or self.groq_api_key)

@@ -8,6 +8,8 @@ from typing import Annotated
 from uuid import uuid4
 
 from fastapi import FastAPI, File, Form, Security, UploadFile
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field
 
 from src.api.errors import ApiError, register_error_handlers
 from src.api.service_auth import resolve_caller, service_key_header
@@ -21,6 +23,18 @@ from src.services.analysis import AnalysisResponse, analyze_image
 from src.version import VERSION
 
 logger = logging.getLogger(__name__)
+
+
+class HealthStatus(BaseModel):
+    status: str = Field(description="UP quando o processo responde.", examples=["UP"])
+    version: str = Field(description="Versão do release.", examples=["0.2.0"])
+
+
+class ReadyStatus(BaseModel):
+    status: str = Field(
+        description="UP com um provedor de visão configurado; DOWN (503) sem nenhum.",
+        examples=["UP"],
+    )
 
 
 class Purpose(StrEnum):
@@ -51,9 +65,15 @@ def create_app(
         UploadGate, service_keys=settings.service_keys, callers=analyze_callers
     )
 
-    @application.get("/health")
-    async def health() -> dict[str, object]:
-        return {"status": "ready" if settings.ready else "not_configured"}
+    @application.get("/health", response_model=HealthStatus)
+    async def health() -> HealthStatus:
+        return HealthStatus(status="UP", version=VERSION)
+
+    @application.get("/ready", response_model=ReadyStatus)
+    async def ready() -> JSONResponse:
+        if not settings.ready:
+            return JSONResponse({"status": "DOWN"}, status_code=503)
+        return JSONResponse({"status": "UP"})
 
     @application.post("/v1/images/analyze", response_model=AnalysisResponse)
     async def analyze(
