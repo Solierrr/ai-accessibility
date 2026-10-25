@@ -8,11 +8,16 @@ import httpx
 from PIL import Image
 
 from src.api.app import create_app
+from src.api.errors import ApiError
+from src.api.service_auth import resolve_caller
 from src.core.config import Settings
 from src.moderation.models import CaptionSuggestion, VisionAssessment
 from src.moderation.policy import Decision, decide
 from src.providers.gemini import ModerationObservation, ProviderError
 from src.services.analysis import analyze_image
+
+SERVICE_KEY = "k" * 32
+SERVICE_HEADERS = {"X-Service-Key": SERVICE_KEY}
 
 
 def valid_image() -> bytes:
@@ -174,11 +179,11 @@ class ApiTests(unittest.TestCase):
     def test_authentication_and_analysis_contract(self) -> None:
         async def run() -> None:
             settings = Settings(
-                google_api_key="test-key", internal_api_token="test-secret"
+                google_api_key="test-key", service_keys={"api-core": SERVICE_KEY}
             )
             app = create_app(settings, FakeProvider())
             operation = app.openapi()["paths"]["/v1/images/analyze"]["post"]
-            self.assertTrue(operation["security"])
+            self.assertEqual(operation["security"], [{"serviceKey": []}])
             schema_ref = operation["requestBody"]["content"]["multipart/form-data"][
                 "schema"
             ]["$ref"]
@@ -209,11 +214,30 @@ class ApiTests(unittest.TestCase):
                 self.assertEqual(unauthorized.json()["errorCode"], "UNAUTHENTICATED")
                 self.assertEqual(unauthorized.json()["instance"], "/v1/images/analyze")
 
+                old_token = await client.post(
+                    "/v1/images/analyze",
+                    data=payload,
+                    files=files,
+                    headers={"Authorization": f"Bearer {SERVICE_KEY}"},
+                )
+                self.assertEqual(old_token.status_code, 401)
+
+                wrong_key = await client.post(
+                    "/v1/images/analyze",
+                    data=payload,
+                    files=files,
+                    headers={"X-Service-Key": "x" * 40},
+                )
+                self.assertEqual(wrong_key.status_code, 401)
+                self.assertEqual(
+                    wrong_key.json()["detail"], "Chave de serviço ausente ou inválida."
+                )
+
                 authorized = await client.post(
                     "/v1/images/analyze",
                     data=payload,
                     files=files,
-                    headers={"Authorization": "Bearer test-secret"},
+                    headers=SERVICE_HEADERS,
                 )
                 self.assertEqual(authorized.status_code, 200)
                 body = authorized.json()
@@ -229,7 +253,7 @@ class ApiTests(unittest.TestCase):
                     "/v1/images/analyze",
                     data={**payload, "max_alt_chars": "151"},
                     files=files,
-                    headers={"Authorization": "Bearer test-secret"},
+                    headers=SERVICE_HEADERS,
                 )
                 self.assertEqual(larger_limit.status_code, 200)
 
@@ -237,7 +261,7 @@ class ApiTests(unittest.TestCase):
                     "/v1/images/analyze",
                     data={**payload, "max_alt_chars": "0"},
                     files=files,
-                    headers={"Authorization": "Bearer test-secret"},
+                    headers=SERVICE_HEADERS,
                 )
                 self.assertEqual(invalid_limit.status_code, 422)
                 problem = invalid_limit.json()
@@ -250,7 +274,7 @@ class ApiTests(unittest.TestCase):
                     "/v1/images/analyze",
                     data=payload,
                     files={"image": ("fake.jpg", b"not an image", "image/jpeg")},
-                    headers={"Authorization": "Bearer test-secret"},
+                    headers=SERVICE_HEADERS,
                 )
                 self.assertEqual(invalid.json()["decision"], "rejected")
                 self.assertEqual(invalid.json()["reason_codes"], ["INVALID_IMAGE"])
@@ -261,7 +285,7 @@ class ApiTests(unittest.TestCase):
                     files={
                         "image": ("huge.jpg", b"x" * (9 * 1024 * 1024), "image/jpeg")
                     },
-                    headers={"Authorization": "Bearer test-secret"},
+                    headers=SERVICE_HEADERS,
                 )
                 self.assertEqual(too_large.status_code, 413)
                 self.assertEqual(too_large.json()["errorCode"], "PAYLOAD_TOO_LARGE")
@@ -271,6 +295,29 @@ class ApiTests(unittest.TestCase):
                 self.assertEqual(missing.json()["errorCode"], "NOT_FOUND")
 
         asyncio.run(run())
+
+
+class ServiceKeyTests(unittest.TestCase):
+    def test_destination_without_keys_refuses_everything(self) -> None:
+        with self.assertRaises(ApiError) as raised:
+            resolve_caller(SERVICE_KEY, {}, ())
+        self.assertEqual(raised.exception.status, 401)
+
+    def test_caller_not_accepted_on_the_route_is_forbidden(self) -> None:
+        with self.assertRaises(ApiError) as raised:
+            resolve_caller(SERVICE_KEY, {"api-core": SERVICE_KEY}, ("api-auth",))
+        self.assertEqual(raised.exception.status, 403)
+        self.assertEqual(raised.exception.error_code, "FORBIDDEN")
+
+    def test_accepted_caller_is_resolved(self) -> None:
+        self.assertEqual(
+            resolve_caller(SERVICE_KEY, {"api-core": SERVICE_KEY}, ("api-core",)),
+            "api-core",
+        )
+
+    def test_short_key_is_refused_at_startup(self) -> None:
+        with self.assertRaises(ValueError):
+            Settings(google_api_key="test-key", service_keys={"api-core": "short"})
 
 
 if __name__ == "__main__":

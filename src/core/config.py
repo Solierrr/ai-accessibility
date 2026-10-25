@@ -2,23 +2,38 @@
 
 import os
 import re
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from dotenv import load_dotenv
 
 _MODEL_PATTERN = re.compile(r"^[A-Za-z0-9._-]+$")
+SERVICE_CALLERS: tuple[str, ...] = ()
+MIN_SERVICE_KEY_LENGTH = 32
+
+
+def service_key_variable(caller: str) -> str:
+    return "SERVICE_KEY_" + caller.upper().replace("-", "_")
 
 
 @dataclass(frozen=True, slots=True)
 class Settings:
     google_api_key: str | None
-    internal_api_token: str | None
+    service_keys: Mapping[str, str] = field(default_factory=dict)
     gemini_model: str = "gemini-3.5-flash"
     gemini_timeout_seconds: float = 60.0
     max_concurrent_analyses: int = 4
     groq_api_key: str | None = None
     groq_model: str = "qwen/qwen3.8-27b"
+
+    def __post_init__(self) -> None:
+        for caller, key in self.service_keys.items():
+            if len(key) < MIN_SERVICE_KEY_LENGTH:
+                raise ValueError(
+                    f"{service_key_variable(caller)} precisa ter ao menos "
+                    f"{MIN_SERVICE_KEY_LENGTH} caracteres"
+                )
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -42,7 +57,11 @@ class Settings:
                 or os.getenv("GOOGLE_API_KEY")
                 or None
             ),
-            internal_api_token=os.getenv("INTERNAL_API_TOKEN") or None,
+            service_keys={
+                caller: key
+                for caller in SERVICE_CALLERS
+                if (key := os.getenv(service_key_variable(caller)))
+            },
             gemini_model=model,
             gemini_timeout_seconds=timeout,
             max_concurrent_analyses=concurrency,
@@ -56,6 +75,4 @@ class Settings:
 
     @property
     def ready(self) -> bool:
-        return bool(
-            (self.google_api_key or self.groq_api_key) and self.internal_api_token
-        )
+        return bool((self.google_api_key or self.groq_api_key) and self.service_keys)

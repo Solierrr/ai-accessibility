@@ -1,7 +1,6 @@
 """API interna para análise de imagem; não publica nem armazena arquivos."""
 
 import asyncio
-import hmac
 import logging
 import re
 from enum import StrEnum
@@ -9,9 +8,9 @@ from typing import Annotated
 from uuid import uuid4
 
 from fastapi import FastAPI, File, Form, Security, UploadFile
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from src.api.errors import ApiError, register_error_handlers
+from src.api.service_auth import resolve_caller, service_key_header
 from src.api.upload_gate import UploadGate
 from src.caption.validation import DEFAULT_ALT_TEXT_CHARS
 from src.core.config import Settings
@@ -22,10 +21,6 @@ from src.services.analysis import AnalysisResponse, analyze_image
 from src.version import VERSION
 
 logger = logging.getLogger(__name__)
-bearer_scheme = HTTPBearer(
-    auto_error=False,
-    description="Token interno do ai-accessibility. No Swagger, informe só o valor; Bearer é acrescentado automaticamente.",
-)
 
 
 class Purpose(StrEnum):
@@ -51,7 +46,10 @@ def create_app(
     semaphore = asyncio.Semaphore(settings.max_concurrent_analyses)
     application = FastAPI(title="Solaria AI Accessibility", version=VERSION)
     register_error_handlers(application)
-    application.add_middleware(UploadGate, token=settings.internal_api_token)
+    analyze_callers = tuple(settings.service_keys)
+    application.add_middleware(
+        UploadGate, service_keys=settings.service_keys, callers=analyze_callers
+    )
 
     @application.get("/health")
     async def health() -> dict[str, object]:
@@ -64,17 +62,9 @@ def create_app(
         max_alt_chars: Annotated[int, Form(ge=1)] = DEFAULT_ALT_TEXT_CHARS,
         request_id: Annotated[str, Form(max_length=100)] = "",
         context_title: Annotated[str, Form(max_length=120)] = "",
-        credentials: Annotated[
-            HTTPAuthorizationCredentials | None, Security(bearer_scheme)
-        ] = None,
+        service_key: Annotated[str | None, Security(service_key_header)] = None,
     ) -> AnalysisResponse:
-        if not settings.internal_api_token:
-            raise ApiError(
-                503, "DEPENDENCY_UNAVAILABLE", "Autenticação interna não configurada."
-            )
-        supplied = credentials.credentials if credentials else ""
-        if not hmac.compare_digest(supplied, settings.internal_api_token):
-            raise ApiError(401, "UNAUTHENTICATED", "Credencial interna inválida.")
+        resolve_caller(service_key, settings.service_keys, analyze_callers)
         if not (settings.google_api_key or settings.groq_api_key):
             raise ApiError(
                 503, "DEPENDENCY_UNAVAILABLE", "Provedor de visão não configurado."
