@@ -43,7 +43,7 @@ O `web-app` ainda não tem upload conectado a esta API. Para testar agora, envie
 
 ## API
 
-`GET /health` informa se chave do provedor e token interno estão configurados. `POST /v1/images/analyze` exige `Authorization: Bearer <INTERNAL_API_TOKEN>` e formulário com `image`, `purpose` e, opcionalmente, `request_id`, `context_title` e `max_alt_chars` (qualquer inteiro positivo; padrão 150). A legenda é gerada em pt-BR. O Swagger local fica em `/docs`.
+`GET /health` responde se o processo está vivo (com a versão) e `GET /ready` se há provedor de visão configurado (503 sem nenhum). `POST /v1/images/analyze` exige `X-Service-Key` com a chave de um serviço chamador aceito (`SERVICE_KEY_<CHAMADOR>`) e formulário com `image`, `purpose` e, opcionalmente, `request_id`, `context_title` e `max_alt_chars` (qualquer inteiro positivo; padrão 150). A legenda é gerada em pt-BR. O Swagger fica em `/docs` e o contrato em `/openapi.json` (desligados com `DOCS_ENABLED=false`); o `openapi.yaml` do repositório é gerado por `make openapi`. Erros seguem o contrato de erro da organização (`application/problem+json` com `errorCode`).
 
 Configure a chave Gemini em `GEMINI_API_KEY` (a mesma dos demais serviços; `GEMINI_AI_ACCESSIBILITY_KEY` e `GOOGLE_API_KEY` ainda funcionam como nomes legados, nessa ordem de prioridade). `GROQ_API_KEY` (ou o legado `GROQ_AI_ACCESSIBILITY_KEY`) ativa o GroqCloud como fallback em falhas técnicas. Com `GROQ_MODEL` vazio, usa `qwen/qwen3.8-27b`. GroqCloud e xAI/Grok são serviços diferentes.
 
