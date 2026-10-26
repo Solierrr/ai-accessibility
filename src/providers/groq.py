@@ -48,7 +48,10 @@ class GroqVisionProvider:
                 raise ProviderError("Resposta de descrição inválida") from exc
 
         suggestion = await generate_caption(retry=False)
-        if not suggestion.uncertain and len(" ".join(suggestion.alt_text.split())) > max_alt_chars:
+        if (
+            not suggestion.uncertain
+            and len(" ".join(suggestion.alt_text.split())) > max_alt_chars
+        ):
             suggestion = await generate_caption(retry=True)
         return suggestion
 

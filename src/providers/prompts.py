@@ -41,7 +41,9 @@ def caption_prompt(
     guidance = (
         _RETRY_CAPTION_GUIDANCE.format(max_alt_chars=max_alt_chars)
         if retry
-        else _SHORT_CAPTION_GUIDANCE if max_alt_chars <= 20 else ""
+        else _SHORT_CAPTION_GUIDANCE
+        if max_alt_chars <= 20
+        else ""
     )
     return _CAPTION_PROMPT.format(
         purpose=purpose,
