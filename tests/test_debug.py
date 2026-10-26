@@ -35,10 +35,15 @@ class FakeProvider(BaseProvider):
         self.model_version = model_version
         self.moderation_error = moderation_error
 
-    async def moderate(self, image):
+    async def moderate(self, image, *, prompt=None, capture=None):
         if self.moderation_error is not None:
+            if capture is not None:
+                record = capture.begin(
+                    prompt or "MODERATION-PROMPT", self.model_version
+                )
+                record.fail(self.moderation_error)
             raise self.moderation_error
-        return await super().moderate(image)
+        return await super().moderate(image, prompt=prompt, capture=capture)
 
 
 def fake_decode(token: str, *, jwks_url: str, issuer: str) -> str | None:
@@ -136,7 +141,7 @@ class AccessTests(unittest.TestCase):
 class StepTests(unittest.TestCase):
     @staticmethod
     def steps(response: httpx.Response) -> list[dict]:
-        return response.json()["debug"]["steps"]
+        return response.json()["debug"]["nodes"]
 
     def test_approved_flow_lists_every_stage_without_media_or_text(self) -> None:
         response = post_debug(make_settings())
@@ -145,7 +150,7 @@ class StepTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(body["decision"], "approved")
         self.assertEqual(
-            [step["stage"] for step in body["debug"]["steps"]],
+            [node["node"] for node in body["debug"]["nodes"]],
             [
                 "image_validation",
                 "moderation",
@@ -165,17 +170,18 @@ class StepTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         steps = self.steps(response)
-        self.assertEqual([step["stage"] for step in steps], ["image_validation"])
-        self.assertEqual(steps[0]["outcome"], "rejected")
+        self.assertEqual([step["node"] for step in steps], ["image_validation"])
+        self.assertEqual(steps[0]["output"]["outcome"], "rejected")
+        self.assertNotIn("run_id", response.json()["debug"])
 
     def test_policy_rejection_never_calls_the_caption(self) -> None:
         provider = FakeProvider(visual=assessment(graphic_violence="explicit"))
 
         response = post_debug(make_settings(), provider)
 
-        stages = [step["stage"] for step in self.steps(response)]
+        stages = [step["node"] for step in self.steps(response)]
         self.assertEqual(stages, ["image_validation", "moderation", "policy"])
-        self.assertEqual(self.steps(response)[-1]["outcome"], "rejected")
+        self.assertEqual(self.steps(response)[-1]["output"]["outcome"], "rejected")
         self.assertEqual(provider.caption_calls, 0)
 
     def test_moderation_failure_with_fallback_shows_error_then_ok(self) -> None:
@@ -187,10 +193,11 @@ class StepTests(unittest.TestCase):
             make_settings(), primary, fallback=FakeProvider("test/fallback")
         )
 
-        moderation = [s for s in self.steps(response) if s["stage"] == "moderation"]
-        self.assertEqual([s["outcome"] for s in moderation], ["error", "ok"])
-        self.assertEqual(moderation[0]["provider"], "test/primary")
-        self.assertEqual(moderation[1]["provider"], "test/fallback")
+        moderation = [s for s in self.steps(response) if s["node"] == "moderation"]
+        self.assertEqual([s["output"]["outcome"] for s in moderation], ["error", "ok"])
+        self.assertEqual(moderation[0]["output"]["provider"], "test/primary")
+        self.assertEqual(moderation[1]["output"]["provider"], "test/fallback")
+        self.assertEqual([s["status"] for s in moderation], ["error", "ok"])
 
     def test_provider_safety_block_shows_as_blocked(self) -> None:
         provider = FakeProvider(moderation_error=ProviderBlocked("bloqueado"))
@@ -198,7 +205,7 @@ class StepTests(unittest.TestCase):
         response = post_debug(make_settings(), provider)
 
         self.assertEqual(response.json()["decision"], "review_required")
-        self.assertEqual(self.steps(response)[-1]["outcome"], "blocked")
+        self.assertEqual(self.steps(response)[-1]["output"]["outcome"], "blocked")
 
     def test_provider_failure_keeps_only_the_status_code(self) -> None:
         provider = FakeProvider(
@@ -208,7 +215,8 @@ class StepTests(unittest.TestCase):
         response = post_debug(make_settings(), provider)
 
         failure = self.steps(response)[-1]
-        self.assertEqual(failure["status_code"], 429)
+        self.assertEqual(failure["output"]["status_code"], 429)
+        self.assertEqual(failure["error"], "ProviderError (HTTP 429)")
         self.assertNotIn("segredo-do-provedor", json.dumps(response.json()["debug"]))
 
 

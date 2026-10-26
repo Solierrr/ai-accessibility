@@ -4,9 +4,10 @@ Roda a análise de uma imagem e devolve, junto da resposta normal, as etapas que
 percorreu. Existe para o playground do sandbox e para uso interno; não faz parte do
 contrato público e não aparece no OpenAPI nem no Swagger.
 
-Este serviço não tem grafo nem LangChain, então o debug mostra as **etapas da análise**,
-só com metadados. A regra do serviço continua valendo: imagem, prompt, legenda e resposta
-bruta do provedor nunca são registrados.
+Este serviço não tem grafo nem LangChain, então o debug mostra as **etapas da análise**
+como nós (`debug.nodes`), no mesmo formato dos outros serviços. As etapas que chamam um
+modelo (`moderation` e `caption`) trazem o prompt enviado, o modelo e os tokens. A regra do
+serviço continua valendo: imagem, legenda e resposta bruta do provedor nunca saem.
 
 ## Acesso
 
@@ -54,28 +55,42 @@ Os campos de `/v1/images/analyze` mais `debug`:
   "policy_version": "v1", "model_version": "gemini/gemini-3.5-flash",
   "debug": {
     "environment": "QA", "persisted": false, "duration_ms": 2310.5,
-    "steps": [
-      { "order": 1, "stage": "image_validation", "outcome": "ok", "duration_ms": 4.2,
-        "mime_type": "image/png", "width": 800, "height": 600 },
-      { "order": 2, "stage": "moderation", "outcome": "ok", "duration_ms": 1180.0,
-        "provider": "gemini/gemini-3.5-flash", "safety_flagged": false,
-        "signals": { "sexual_content": "none", "context": "ordinary", "...": "..." } },
-      { "order": 3, "stage": "policy", "outcome": "approved", "duration_ms": 0.1,
-        "policy_version": "v1", "reason_codes": [], "categories": [] },
-      { "order": 4, "stage": "caption", "outcome": "ok", "duration_ms": 1100.3,
-        "provider": "gemini/gemini-3.5-flash", "uncertain": false, "alt_text_chars": 62 },
-      { "order": 5, "stage": "caption_validation", "outcome": "ok", "duration_ms": 0.1,
-        "alt_text_chars": 62 }
-    ]
+    "turn": 0, "run_id": "0b6f...-...",
+    "nodes": [
+      { "order": 1, "node": "image_validation", "status": "ok", "duration_ms": 4.2,
+        "input": { "bytes": 48213 }, "output": { "outcome": "ok", "mime_type": "image/png", "width": 800, "height": 600 },
+        "llm_calls": [], "error": null },
+      { "order": 2, "node": "moderation", "status": "ok", "duration_ms": 1180.0,
+        "input": { "mime_type": "image/png", "width": 800, "height": 600 },
+        "output": { "outcome": "ok", "provider": "gemini/gemini-3.5-flash", "safety_flagged": false,
+                    "signals": { "sexual_content": "none", "context": "ordinary", "...": "..." } },
+        "llm_calls": [
+          { "model": "gemini/gemini-3.5-flash",
+            "prompt": [ { "type": "system", "content": "Você avalia imagens...", "editable": true },
+                        { "type": "human", "content": "[imagem omitida]", "editable": false } ],
+            "prompt_complete": true,
+            "completion": "{\"confidence\": \"high\", ...}",
+            "tokens_in": 1200, "tokens_out": 90, "latency_ms": 1100.3, "error": null } ],
+        "error": null },
+      { "order": 3, "node": "policy", "status": "ok", "output": { "outcome": "approved", "policy_version": "v1", "reason_codes": [], "categories": [] }, "llm_calls": [] },
+      { "order": 4, "node": "caption", "status": "ok", "output": { "outcome": "ok", "uncertain": false, "alt_text_chars": 62 }, "llm_calls": [ "..." ] },
+      { "order": 5, "node": "caption_validation", "status": "ok", "output": { "outcome": "ok", "alt_text_chars": 62 }, "llm_calls": [] }
+    ],
+    "llm_calls_outside_nodes": [],
+    "truncated": false
   }
 }
 ```
 
+`debug.run_id` só vem quando a imagem passou na validação (é o que permite reexecutar uma
+etapa). `debug.turn` é sempre `0`.
+
 ## Etapas
 
-`duration_ms` de cada etapa vai do fim da anterior até o fim dela.
+`duration_ms` de cada etapa vai do fim da anterior até o fim dela. `status` é `error` só
+quando o provedor falhou; o desfecho de negócio fica em `output.outcome`.
 
-| Etapa | `outcome` | Campos |
+| Etapa | `output.outcome` | Campos de `output` |
 |---|---|---|
 | `image_validation` | `ok`, `rejected` | `mime_type`, `width`, `height` (ok); `code` (rejected) |
 | `moderation` | `ok`, `error`, `blocked` | `provider`, `safety_flagged`, `signals` (ok); `provider`, `status_code`, `cause_type` (falha) |
@@ -87,11 +102,56 @@ Os campos de `/v1/images/analyze` mais `debug`:
   (ou de nova falha) na mesma etapa, com o `provider` de cada tentativa.
 - Reprovação ou revisão pela política encerra a análise em `policy`: a legenda não é gerada.
 - Falha de provedor guarda só `status_code` e o tipo da causa, nunca a mensagem.
+- `llm_calls[].completion` é um resumo estruturado: na moderação, os sinais; na legenda,
+  só `uncertain` e `alt_text_chars`. **O texto da legenda não sai no debug**; ele continua
+  vindo no campo `alt_text` da resposta da análise.
+- Quando a legenda excede o limite, o provedor faz uma segunda chamada (prompt de nova
+  tentativa gerado pelo serviço); ela aparece como segunda `llm_calls`, não editável.
+
+## Prompt e privacidade
+
+O prompt sai com CPF, CNPJ, e-mail e telefone mascarados (o título do contexto é texto do
+usuário e entra no prompt da legenda). O prompt nunca é cortado. Se algo foi mascarado,
+`prompt_complete` é `false` e a mensagem vem com `editable: false`: um prompt
+mascarado não pode ser reenviado.
+
+## Reexecutar uma etapa com o prompt editado
+
+`POST /debug/images/stage` (JSON, mesmo JWT de admin) roda só a chamada ao modelo de
+`moderation` ou `caption`, com a imagem e os parâmetros da análise original:
+
+```json
+{ "run_id": "<debug.run_id>", "node": "caption", "occurrence": 0, "stop_after_node": true,
+  "prompts": [ { "call": 0, "prompt": [ { "type": "system", "content": "novo prompt" } ] } ] }
+```
+
+- `occurrence` escolhe a tentativa da etapa (0 é a primeira; com fallback, 1 é o provedor
+  reserva). A reexecução usa o provedor daquela tentativa.
+- Só a mensagem `system` da chamada `0` é lida. Se a legenda for longa demais, a segunda
+  chamada usa o prompt padrão de nova tentativa.
+- A resposta é `{ "debug": { "nodes": [<um nó>], "custom": { "run_id", "node", "turn": 0,
+  "occurrence", "stopped": true, "overrides_applied", "next": ["policy"] } } }`. Para
+  `moderation`, `next` é `policy`; para `caption`, `caption_validation`. Falha do provedor
+  volta como `200` com o nó em `status: "error"`.
+
+| Status | Quando |
+|---|---|
+| `404` | Análise expirada, de outro admin, reiniciada ou em outra instância; tentativa inexistente |
+| `409` | O provedor daquela tentativa não está mais configurado |
+| `413` | Corpo acima de 8 MB |
+| `422` | Corpo inválido, ou etapa sem chamada a modelo (`image_validation`, `policy`, `caption_validation`) |
+
+A imagem enviada fica em memória por **15 minutos**, no máximo 10 análises por admin e 64 MB
+no total; as mais antigas saem primeiro. É por instância: com mais de uma réplica, a
+reexecução pode cair em uma que não tem a análise e responder `404`. Cada reexecução gasta
+cota real do provedor e deixa uma linha de log com o `sub`, a etapa e a quantidade de
+prompts, sem o conteúdo.
 
 ## O que nunca sai
 
-Bytes ou base64 da imagem, prompt, `alt_text`, resposta bruta e mensagens de erro do
-provedor. O debug existe só na resposta: nada é persistido.
+Bytes ou base64 da imagem, `alt_text`, resposta bruta e mensagens de erro do provedor. O
+prompt sai mascarado, como descrito acima. Nada é gravado em banco: só a imagem da análise
+fica em memória pelo tempo acima.
 
 ## Variáveis
 
