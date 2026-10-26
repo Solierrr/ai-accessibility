@@ -7,8 +7,10 @@ from starlette.responses import JSONResponse
 from src.image.validation import MAX_UPLOAD_BYTES
 
 MAX_REQUEST_BYTES = MAX_UPLOAD_BYTES + 256 * 1024  # margem para campos multipart
+MAX_STAGE_BYTES = 8 * 1024 * 1024
 ANALYZE_PATH = "/v1/images/analyze"
 DEBUG_ANALYZE_PATH = "/debug/images/analyze"
+DEBUG_STAGE_PATH = "/debug/images/stage"
 
 
 class UploadGate:
@@ -20,9 +22,14 @@ class UploadGate:
         if scope["type"] != "http" or scope["path"] not in (
             ANALYZE_PATH,
             DEBUG_ANALYZE_PATH,
+            DEBUG_STAGE_PATH,
         ):
             await self.app(scope, receive, send)
             return
+
+        limit = (
+            MAX_STAGE_BYTES if scope["path"] == DEBUG_STAGE_PATH else MAX_REQUEST_BYTES
+        )
 
         headers = dict(scope.get("headers", []))
 
@@ -42,8 +49,8 @@ class UploadGate:
         try:
             declared = int(headers.get(b"content-length", b"0"))
         except ValueError:
-            declared = MAX_REQUEST_BYTES + 1
-        if declared > MAX_REQUEST_BYTES:
+            declared = limit + 1
+        if declared > limit:
             await JSONResponse({"detail": "Upload excede o limite"}, status_code=413)(
                 scope, receive, send
             )
@@ -58,7 +65,7 @@ class UploadGate:
             if message["type"] != "http.request":
                 continue
             total += len(message.get("body", b""))
-            if total > MAX_REQUEST_BYTES:
+            if total > limit:
                 await JSONResponse(
                     {"detail": "Upload excede o limite"}, status_code=413
                 )(scope, receive, send)

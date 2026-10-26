@@ -12,6 +12,7 @@ from pydantic import ValidationError
 from src.core.config import Settings
 from src.image.validation import ValidatedImage
 from src.moderation.models import CaptionSuggestion, VisionAssessment
+from src.providers.capture import CallCapture
 from src.providers.prompts import MODERATION_PROMPT, caption_prompt
 
 _BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models"
@@ -44,10 +45,23 @@ class ModerationObservation:
 class VisionProvider(Protocol):
     model_version: str
 
-    async def moderate(self, image: ValidatedImage) -> ModerationObservation: ...
+    async def moderate(
+        self,
+        image: ValidatedImage,
+        *,
+        prompt: str | None = None,
+        capture: CallCapture | None = None,
+    ) -> ModerationObservation: ...
 
     async def caption(
-        self, image: ValidatedImage, *, purpose: str, title: str, max_alt_chars: int
+        self,
+        image: ValidatedImage,
+        *,
+        purpose: str,
+        title: str,
+        max_alt_chars: int,
+        prompt: str | None = None,
+        capture: CallCapture | None = None,
     ) -> CaptionSuggestion: ...
 
 
@@ -59,24 +73,43 @@ class GeminiVisionProvider:
         self.model_version = f"gemini/{settings.gemini_model}"
         self._client = client
 
-    async def moderate(self, image: ValidatedImage) -> ModerationObservation:
-        data, flagged = await self._generate(image, MODERATION_PROMPT)
+    async def moderate(
+        self,
+        image: ValidatedImage,
+        *,
+        prompt: str | None = None,
+        capture: CallCapture | None = None,
+    ) -> ModerationObservation:
+        data, flagged = await self._generate(
+            image, prompt or MODERATION_PROMPT, capture
+        )
         try:
             return ModerationObservation(VisionAssessment.model_validate(data), flagged)
         except ValidationError as exc:
             raise ProviderError("Resposta de moderação inválida") from exc
 
     async def caption(
-        self, image: ValidatedImage, *, purpose: str, title: str, max_alt_chars: int
+        self,
+        image: ValidatedImage,
+        *,
+        purpose: str,
+        title: str,
+        max_alt_chars: int,
+        prompt: str | None = None,
+        capture: CallCapture | None = None,
     ) -> CaptionSuggestion:
         async def generate_caption(*, retry: bool) -> CaptionSuggestion:
-            prompt = caption_prompt(
-                purpose=purpose,
-                title=title,
-                max_alt_chars=max_alt_chars,
-                retry=retry,
+            text = (
+                prompt
+                if prompt and not retry
+                else caption_prompt(
+                    purpose=purpose,
+                    title=title,
+                    max_alt_chars=max_alt_chars,
+                    retry=retry,
+                )
             )
-            data, flagged = await self._generate(image, prompt)
+            data, flagged = await self._generate(image, text, capture)
             if flagged:
                 raise ProviderBlocked("Filtro de segurança na descrição")
             try:
@@ -93,8 +126,28 @@ class GeminiVisionProvider:
         return suggestion
 
     async def _generate(
-        self, image: ValidatedImage, prompt: str
+        self,
+        image: ValidatedImage,
+        prompt: str,
+        capture: CallCapture | None = None,
     ) -> tuple[object, bool]:
+        record = capture.begin(prompt, self.model_version) if capture else None
+        try:
+            data, flagged, usage = await self._request(image, prompt)
+        except ProviderError as exc:
+            if record:
+                record.fail(exc)
+            raise
+        if record:
+            record.done(
+                tokens_in=usage.get("promptTokenCount"),
+                tokens_out=usage.get("candidatesTokenCount"),
+            )
+        return data, flagged
+
+    async def _request(
+        self, image: ValidatedImage, prompt: str
+    ) -> tuple[object, bool, dict]:
         if not self.settings.google_api_key:
             raise ProviderError("Provedor não configurado")
         request_body = {
@@ -181,7 +234,12 @@ class GeminiVisionProvider:
                 or rating.get("blocked") is True
                 for rating in candidate.get("safetyRatings", [])
             )
-            return json.loads(content), flagged
+            usage = payload.get("usageMetadata")
+            return (
+                json.loads(content),
+                flagged,
+                usage if isinstance(usage, dict) else {},
+            )
         except ProviderBlocked:
             raise
         except (IndexError, KeyError, TypeError, ValueError) as exc:

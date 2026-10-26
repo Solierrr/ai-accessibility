@@ -8,8 +8,9 @@ from pydantic import BaseModel, ConfigDict
 from src.caption.validation import DEFAULT_ALT_TEXT_CHARS, validated_alt_text
 from src.image.validation import ImageValidationError, validate_image
 from src.moderation.policy import POLICY_VERSION, Decision, decide
+from src.providers.capture import CallCapture
 from src.providers.gemini import ProviderBlocked, ProviderError, VisionProvider
-from src.services.trace import StepRecorder
+from src.services.trace import StepRecorder, completion_summary, llm_calls
 
 logger = logging.getLogger(__name__)
 
@@ -57,7 +58,19 @@ async def analyze_image(
         if trace is not None:
             trace.add(stage, outcome, **info)
 
-    def note_failure(stage: str, provider_name: str, exc: ProviderError) -> None:
+    def new_capture() -> CallCapture | None:
+        return CallCapture() if trace is not None else None
+
+    def with_capture(capture: CallCapture | None) -> dict[str, CallCapture]:
+        return {"capture": capture} if capture is not None else {}
+
+    def note_failure(
+        stage: str,
+        provider_name: str,
+        exc: ProviderError,
+        capture: CallCapture | None,
+        inputs: dict[str, object],
+    ) -> None:
         outcome = "blocked" if isinstance(exc, ProviderBlocked) else "error"
         note(
             stage,
@@ -65,6 +78,8 @@ async def analyze_image(
             provider=provider_name,
             status_code=exc.status_code,
             cause_type=type(exc.__cause__).__name__ if exc.__cause__ else None,
+            inputs=inputs,
+            llm_calls=llm_calls(capture, None),
         )
 
     def result(
@@ -87,7 +102,12 @@ async def analyze_image(
     try:
         image = validate_image(content)
     except ImageValidationError as exc:
-        note("image_validation", "rejected", code=exc.code)
+        note(
+            "image_validation",
+            "rejected",
+            code=exc.code,
+            inputs={"bytes": len(content)},
+        )
         return result(Decision.REJECTED, (exc.code,))
     note(
         "image_validation",
@@ -95,39 +115,79 @@ async def analyze_image(
         mime_type=image.mime_type,
         width=image.width,
         height=image.height,
+        inputs={"bytes": len(content)},
     )
 
+    moderation_input = {
+        "mime_type": image.mime_type,
+        "width": image.width,
+        "height": image.height,
+    }
     moderation_provider = provider
+    capture = new_capture()
     try:
-        observation = await moderation_provider.moderate(image)
+        observation = await moderation_provider.moderate(image, **with_capture(capture))
     except ProviderBlocked as exc:
-        note_failure("moderation", moderation_provider.model_version, exc)
+        note_failure(
+            "moderation",
+            moderation_provider.model_version,
+            exc,
+            capture,
+            moderation_input,
+        )
         return result(Decision.REVIEW_REQUIRED, ("PROVIDER_SAFETY_FLAG",))
     except ProviderError as exc:
         log_provider_failure(moderation_provider.model_version, "moderation", exc)
-        note_failure("moderation", moderation_provider.model_version, exc)
+        note_failure(
+            "moderation",
+            moderation_provider.model_version,
+            exc,
+            capture,
+            moderation_input,
+        )
         if fallback_provider is None:
             return result(Decision.REVIEW_REQUIRED, ("PROVIDER_UNAVAILABLE",))
         moderation_provider = fallback_provider
+        capture = new_capture()
         try:
-            observation = await moderation_provider.moderate(image)
+            observation = await moderation_provider.moderate(
+                image, **with_capture(capture)
+            )
         except ProviderBlocked as fallback_exc:
-            note_failure("moderation", moderation_provider.model_version, fallback_exc)
+            note_failure(
+                "moderation",
+                moderation_provider.model_version,
+                fallback_exc,
+                capture,
+                moderation_input,
+            )
             return result(Decision.REVIEW_REQUIRED, ("PROVIDER_SAFETY_FLAG",))
         except ProviderError as fallback_exc:
             log_provider_failure(
                 moderation_provider.model_version, "moderation", fallback_exc
             )
-            note_failure("moderation", moderation_provider.model_version, fallback_exc)
+            note_failure(
+                "moderation",
+                moderation_provider.model_version,
+                fallback_exc,
+                capture,
+                moderation_input,
+            )
             return result(Decision.REVIEW_REQUIRED, ("PROVIDER_UNAVAILABLE",))
 
     used_models.append(moderation_provider.model_version)
+    signals = observation.assessment.model_dump(mode="json")
     note(
         "moderation",
         "ok",
         provider=moderation_provider.model_version,
         safety_flagged=observation.safety_flagged,
-        signals=observation.assessment.model_dump(mode="json"),
+        signals=signals,
+        inputs=moderation_input,
+        llm_calls=llm_calls(
+            capture,
+            completion_summary(**signals, safety_flagged=observation.safety_flagged),
+        ),
     )
 
     policy = decide(observation.assessment, safety_flagged=observation.safety_flagged)
@@ -141,38 +201,63 @@ async def analyze_image(
     if policy.decision != Decision.APPROVED:
         return result(policy.decision, policy.reason_codes, policy.categories)
 
+    caption_input = {
+        "purpose": purpose,
+        "max_alt_chars": max_alt_chars,
+        "context_title_chars": len(context_title),
+    }
     caption_provider = moderation_provider
+    capture = new_capture()
     try:
         suggestion = await caption_provider.caption(
             image,
             purpose=purpose,
             title=context_title,
             max_alt_chars=max_alt_chars,
+            **with_capture(capture),
         )
     except ProviderBlocked as exc:
-        note_failure("caption", caption_provider.model_version, exc)
+        note_failure(
+            "caption", caption_provider.model_version, exc, capture, caption_input
+        )
         return result(Decision.REVIEW_REQUIRED, ("PROVIDER_SAFETY_FLAG",))
     except ProviderError as exc:
         log_provider_failure(caption_provider.model_version, "caption", exc)
-        note_failure("caption", caption_provider.model_version, exc)
+        note_failure(
+            "caption", caption_provider.model_version, exc, capture, caption_input
+        )
         if fallback_provider is None or caption_provider is fallback_provider:
             return result(Decision.REVIEW_REQUIRED, ("PROVIDER_UNAVAILABLE",))
         caption_provider = fallback_provider
+        capture = new_capture()
         try:
             suggestion = await caption_provider.caption(
                 image,
                 purpose=purpose,
                 title=context_title,
                 max_alt_chars=max_alt_chars,
+                **with_capture(capture),
             )
         except ProviderBlocked as fallback_exc:
-            note_failure("caption", caption_provider.model_version, fallback_exc)
+            note_failure(
+                "caption",
+                caption_provider.model_version,
+                fallback_exc,
+                capture,
+                caption_input,
+            )
             return result(Decision.REVIEW_REQUIRED, ("PROVIDER_SAFETY_FLAG",))
         except ProviderError as fallback_exc:
             log_provider_failure(
                 caption_provider.model_version, "caption", fallback_exc
             )
-            note_failure("caption", caption_provider.model_version, fallback_exc)
+            note_failure(
+                "caption",
+                caption_provider.model_version,
+                fallback_exc,
+                capture,
+                caption_input,
+            )
             return result(Decision.REVIEW_REQUIRED, ("PROVIDER_UNAVAILABLE",))
 
     if caption_provider.model_version != moderation_provider.model_version:
@@ -183,11 +268,29 @@ async def analyze_image(
         provider=caption_provider.model_version,
         uncertain=suggestion.uncertain,
         alt_text_chars=len(suggestion.alt_text),
+        inputs=caption_input,
+        llm_calls=llm_calls(
+            capture,
+            completion_summary(
+                uncertain=suggestion.uncertain,
+                alt_text_chars=len(suggestion.alt_text),
+            ),
+        ),
     )
     alt_text = validated_alt_text(suggestion, max_alt_chars=max_alt_chars)
 
     if alt_text is None:
-        note("caption_validation", "invalid", max_alt_chars=max_alt_chars)
+        note(
+            "caption_validation",
+            "invalid",
+            max_alt_chars=max_alt_chars,
+            inputs={"max_alt_chars": max_alt_chars},
+        )
         return result(Decision.REVIEW_REQUIRED, ("CAPTION_INVALID",))
-    note("caption_validation", "ok", alt_text_chars=len(alt_text))
+    note(
+        "caption_validation",
+        "ok",
+        alt_text_chars=len(alt_text),
+        inputs={"max_alt_chars": max_alt_chars},
+    )
     return result(Decision.APPROVED, alt_text=alt_text)
