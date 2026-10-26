@@ -10,14 +10,14 @@ from src.providers.capture import CallCapture
 
 IMAGE_OMITTED = "[imagem omitida]"
 
+_COUNTRY_CODE = r"(?:\+?55\s?)?"
+_AREA_CODE = r"(?:\(?\d{2}\)?\s?)?"
+_PHONE_NUMBER = r"(?:9\s?)?\d{4}[-\s]?\d{4}\b"
 _PII = (
     ("CNPJ", re.compile(r"\b\d{2}\.?\d{3}\.?\d{3}/?\d{4}-?\d{2}\b")),
     ("CPF", re.compile(r"\b\d{3}\.?\d{3}\.?\d{3}-?\d{2}\b")),
     ("EMAIL", re.compile(r"[\w.+-]{1,64}@[\w-]{1,255}\.[\w.-]{1,255}")),
-    (
-        "TELEFONE",
-        re.compile(r"(?:\+?55\s?)?(?:\(?\d{2}\)?\s?)?(?:9\s?)?\d{4}[-\s]?\d{4}\b"),
-    ),
+    ("TELEFONE", re.compile(_COUNTRY_CODE + _AREA_CODE + _PHONE_NUMBER)),
 )
 
 
