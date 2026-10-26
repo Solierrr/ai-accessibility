@@ -58,6 +58,9 @@ def authorize_debug(
         )
     if not sub:
         raise HTTPException(status_code=401, detail="Token inválido")
-    if sub.lower() not in debug_admin_subs(settings):
+    admin = next(
+        (item for item in debug_admin_subs(settings) if item == sub.lower()), None
+    )
+    if admin is None:
         raise HTTPException(status_code=403, detail="Sem permissão para o modo debug")
-    return sub.lower()
+    return admin

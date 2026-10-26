@@ -282,10 +282,13 @@ def create_app(
         ] = None,
     ) -> dict:
         sub = authorize_debug(settings, credentials)
+        stage = next(
+            (name for name in REPLAYABLE_STAGES if name == payload.node), "desconhecida"
+        )
         logger.info(
             "Execução personalizada de etapa (sub=%s, etapa=%s, prompts=%s)",
             sub,
-            payload.node,
+            stage,
             len(payload.prompts),
         )
         if payload.node not in REPLAYABLE_STAGES:
