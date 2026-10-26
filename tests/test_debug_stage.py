@@ -488,8 +488,9 @@ class ProviderCapture(unittest.TestCase):
             ) as client:
                 provider = GeminiVisionProvider(Settings("k", "t"), client)
                 capture = CallCapture()
+                image = self.image()
                 with self.assertRaises(ProviderError):
-                    await provider.moderate(self.image(), capture=capture)
+                    await provider.moderate(image, capture=capture)
                 return capture
 
         (record,) = asyncio.run(run()).calls
