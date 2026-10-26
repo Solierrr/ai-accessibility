@@ -93,9 +93,7 @@ class GroqVisionProvider:
             )
         return data
 
-    async def _request(self, image: ValidatedImage, prompt: str) -> tuple[object, dict]:
-        if not self.settings.groq_api_key:
-            raise ProviderError("Groq não configurado")
+    def _request_body(self, image: ValidatedImage, prompt: str) -> dict:
         encoded = base64.b64encode(image.content).decode("ascii")
         body = {
             "model": self.settings.groq_model,
@@ -119,54 +117,66 @@ class GroqVisionProvider:
         }
         if self.settings.groq_model == "qwen/qwen3.8-27b":
             body["reasoning_effort"] = "none"
+        return body
+
+    async def _post(self, client: httpx.AsyncClient, body: dict) -> httpx.Response:
         headers = {"Authorization": f"Bearer {self.settings.groq_api_key}"}
         timeout = httpx.Timeout(self.settings.gemini_timeout_seconds)
-
-        async def send(client: httpx.AsyncClient) -> httpx.Response:
-            for attempt in range(2):
-                try:
-                    response = await client.post(
-                        _URL, json=body, headers=headers, timeout=timeout
-                    )
-                except httpx.RequestError as exc:
-                    if attempt == 0:
-                        await asyncio.sleep(0.3)
-                        continue
-                    raise ProviderError("Falha de conexão com Groq") from exc
-                if response.status_code in {500, 502, 503, 504} and attempt == 0:
+        for attempt in range(2):
+            try:
+                response = await client.post(
+                    _URL, json=body, headers=headers, timeout=timeout
+                )
+            except httpx.RequestError as exc:
+                if attempt == 0:
                     await asyncio.sleep(0.3)
                     continue
-                if response.status_code >= 400:
-                    raise ProviderError(
-                        f"Groq retornou HTTP {response.status_code}",
-                        status_code=response.status_code,
-                    )
-                return response
-            raise ProviderError("Groq indisponível")
+                raise ProviderError("Falha de conexão com Groq") from exc
+            if response.status_code in {500, 502, 503, 504} and attempt == 0:
+                await asyncio.sleep(0.3)
+                continue
+            if response.status_code >= 400:
+                raise ProviderError(
+                    f"Groq retornou HTTP {response.status_code}",
+                    status_code=response.status_code,
+                )
+            return response
+        raise ProviderError("Groq indisponível")
 
+    async def _request(self, image: ValidatedImage, prompt: str) -> tuple[object, dict]:
+        if not self.settings.groq_api_key:
+            raise ProviderError("Groq não configurado")
+        body = self._request_body(image, prompt)
         if self._client is None:
             async with httpx.AsyncClient(follow_redirects=False) as client:
-                response = await send(client)
+                response = await self._post(client, body)
         else:
-            response = await send(self._client)
+            response = await self._post(self._client, body)
+        return _parse_response(response)
 
-        try:
-            payload = response.json()
-            choice = payload["choices"][0]
-            if choice.get("finish_reason") == "content_filter" or choice["message"].get(
-                "refusal"
-            ):
-                raise ProviderBlocked("Filtro de segurança do Groq")
-            if choice.get("finish_reason") != "stop":
-                raise ProviderError("Resposta incompleta do Groq")
-            content = choice["message"]["content"]
-            if not isinstance(content, str):
-                raise TypeError("Conteúdo inesperado")
-            usage = payload.get("usage")
-            return json.loads(content), usage if isinstance(usage, dict) else {}
-        except ProviderBlocked:
-            raise
-        except ProviderError:
-            raise
-        except (IndexError, KeyError, TypeError, ValueError) as exc:
-            raise ProviderError("Resposta inválida do Groq") from exc
+
+def _check_choice(choice: dict) -> str:
+    if choice.get("finish_reason") == "content_filter" or choice["message"].get(
+        "refusal"
+    ):
+        raise ProviderBlocked("Filtro de segurança do Groq")
+    if choice.get("finish_reason") != "stop":
+        raise ProviderError("Resposta incompleta do Groq")
+    content = choice["message"]["content"]
+    if not isinstance(content, str):
+        raise TypeError("Conteúdo inesperado")
+    return content
+
+
+def _parse_response(response: httpx.Response) -> tuple[object, dict]:
+    try:
+        payload = response.json()
+        content = _check_choice(payload["choices"][0])
+        usage = payload.get("usage")
+        return json.loads(content), usage if isinstance(usage, dict) else {}
+    except ProviderBlocked:
+        raise
+    except ProviderError:
+        raise
+    except (IndexError, KeyError, TypeError, ValueError) as exc:
+        raise ProviderError("Resposta inválida do Groq") from exc

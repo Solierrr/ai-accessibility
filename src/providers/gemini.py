@@ -145,12 +145,8 @@ class GeminiVisionProvider:
             )
         return data, flagged
 
-    async def _request(
-        self, image: ValidatedImage, prompt: str
-    ) -> tuple[object, bool, dict]:
-        if not self.settings.google_api_key:
-            raise ProviderError("Provedor não configurado")
-        request_body = {
+    def _request_body(self, image: ValidatedImage, prompt: str) -> dict:
+        body = {
             "contents": [
                 {
                     "role": "user",
@@ -174,73 +170,91 @@ class GeminiVisionProvider:
                 for category in _SAFETY_CATEGORIES
             ],
         }
-        if self.settings.gemini_model.startswith("gemini-3.5-"):
-            request_body["generationConfig"]["thinkingConfig"] = {
-                "thinkingLevel": "minimal"
-            }
-        elif self.settings.gemini_model.startswith("gemini-3."):
-            request_body["generationConfig"]["thinkingConfig"] = {
-                "thinkingLevel": "low"
-            }
+        model = self.settings.gemini_model
+        if model.startswith("gemini-3.5-"):
+            level = "minimal"
+        elif model.startswith("gemini-3."):
+            level = "low"
+        else:
+            level = None
+        if level:
+            body["generationConfig"]["thinkingConfig"] = {"thinkingLevel": level}
+        return body
+
+    async def _post(
+        self, client: httpx.AsyncClient, request_body: dict
+    ) -> httpx.Response:
         url = f"{_BASE_URL}/{self.settings.gemini_model}:generateContent"
         headers = {"x-goog-api-key": self.settings.google_api_key}
         timeout = httpx.Timeout(self.settings.gemini_timeout_seconds)
-
-        async def send(client: httpx.AsyncClient) -> httpx.Response:
-            for attempt in range(2):
-                try:
-                    response = await client.post(
-                        url, json=request_body, headers=headers, timeout=timeout
-                    )
-                except httpx.RequestError as exc:
-                    if attempt == 0:
-                        await asyncio.sleep(0.3)
-                        continue
-                    raise ProviderError("Falha de conexão com o provedor") from exc
-                if response.status_code in {500, 502, 503, 504} and attempt == 0:
+        for attempt in range(2):
+            try:
+                response = await client.post(
+                    url, json=request_body, headers=headers, timeout=timeout
+                )
+            except httpx.RequestError as exc:
+                if attempt == 0:
                     await asyncio.sleep(0.3)
                     continue
-                if response.status_code >= 400:
-                    raise ProviderError(
-                        f"Provedor retornou HTTP {response.status_code}",
-                        status_code=response.status_code,
-                    )
-                return response
-            raise ProviderError("Provedor indisponível")
+                raise ProviderError("Falha de conexão com o provedor") from exc
+            if response.status_code in {500, 502, 503, 504} and attempt == 0:
+                await asyncio.sleep(0.3)
+                continue
+            if response.status_code >= 400:
+                raise ProviderError(
+                    f"Provedor retornou HTTP {response.status_code}",
+                    status_code=response.status_code,
+                )
+            return response
+        raise ProviderError("Provedor indisponível")
 
+    async def _request(
+        self, image: ValidatedImage, prompt: str
+    ) -> tuple[object, bool, dict]:
+        if not self.settings.google_api_key:
+            raise ProviderError("Provedor não configurado")
+        request_body = self._request_body(image, prompt)
         if self._client is None:
             async with httpx.AsyncClient(follow_redirects=False) as client:
-                response = await send(client)
+                response = await self._post(client, request_body)
         else:
-            response = await send(self._client)
+            response = await self._post(self._client, request_body)
+        return _parse_response(response)
 
-        try:
-            payload = response.json()
-            if not isinstance(payload, dict):
-                raise TypeError("Resposta não é objeto")
-            feedback = payload.get("promptFeedback") or {}
-            if feedback.get("blockReason"):
-                raise ProviderBlocked("Entrada bloqueada pelo provedor")
-            candidates = payload.get("candidates") or []
-            candidate = candidates[0]
-            if candidate.get("finishReason") != "STOP":
-                raise ProviderBlocked("Resposta incompleta ou bloqueada pelo provedor")
-            parts = candidate["content"]["parts"]
-            content = "".join(
-                part.get("text", "") for part in parts if not part.get("thought", False)
-            )
-            flagged = any(
-                rating.get("probability") in {"MEDIUM", "HIGH"}
-                or rating.get("blocked") is True
-                for rating in candidate.get("safetyRatings", [])
-            )
-            usage = payload.get("usageMetadata")
-            return (
-                json.loads(content),
-                flagged,
-                usage if isinstance(usage, dict) else {},
-            )
-        except ProviderBlocked:
-            raise
-        except (IndexError, KeyError, TypeError, ValueError) as exc:
-            raise ProviderError("Resposta inválida do provedor") from exc
+
+def _candidate_text(candidate: dict) -> str:
+    parts = candidate["content"]["parts"]
+    return "".join(
+        part.get("text", "") for part in parts if not part.get("thought", False)
+    )
+
+
+def _candidate_flagged(candidate: dict) -> bool:
+    return any(
+        rating.get("probability") in {"MEDIUM", "HIGH"} or rating.get("blocked") is True
+        for rating in candidate.get("safetyRatings", [])
+    )
+
+
+def _parse_response(response: httpx.Response) -> tuple[object, bool, dict]:
+    try:
+        payload = response.json()
+        if not isinstance(payload, dict):
+            raise TypeError("Resposta não é objeto")
+        feedback = payload.get("promptFeedback") or {}
+        if feedback.get("blockReason"):
+            raise ProviderBlocked("Entrada bloqueada pelo provedor")
+        candidates = payload.get("candidates") or []
+        candidate = candidates[0]
+        if candidate.get("finishReason") != "STOP":
+            raise ProviderBlocked("Resposta incompleta ou bloqueada pelo provedor")
+        usage = payload.get("usageMetadata")
+        return (
+            json.loads(_candidate_text(candidate)),
+            _candidate_flagged(candidate),
+            usage if isinstance(usage, dict) else {},
+        )
+    except ProviderBlocked:
+        raise
+    except (IndexError, KeyError, TypeError, ValueError) as exc:
+        raise ProviderError("Resposta inválida do provedor") from exc
