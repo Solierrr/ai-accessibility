@@ -12,3 +12,7 @@ python-dotenv==1.2.4
 python-multipart==0.0.32
 uvicorn==0.54.0
 solaria-lib @ git+https://github.com/Solierrr/ai-lib.git@1016ebb7c716fb878bf1ec54635947e84441907e
+opentelemetry-sdk==1.45.1
+opentelemetry-exporter-otlp-proto-http==1.45.1
+opentelemetry-instrumentation-fastapi==0.66b1
+opentelemetry-instrumentation-httpx==0.66b1

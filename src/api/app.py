@@ -16,6 +16,7 @@ from src.api.upload_gate import UploadGate
 from src.caption.validation import DEFAULT_ALT_TEXT_CHARS
 from src.core.config import Settings
 from src.image.validation import MAX_UPLOAD_BYTES
+from src.otel_setup import configure_otel
 from src.providers.gemini import ImageAnalysisProvider
 from src.providers.registry import RegistryImageAnalysisProvider
 from src.services.analysis import AnalysisResponse, analyze_image
@@ -119,6 +120,7 @@ def create_app(
         )
         return response
 
+    configure_otel(application, "ai-accessibility")
     return application
 
 
