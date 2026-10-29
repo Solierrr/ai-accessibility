@@ -43,6 +43,8 @@ O `web-app` ainda não tem upload conectado a esta API. Para testar agora, envie
 
 ## API
 
+O navegador só chama a API a partir das origens de `CORS_ALLOWED_ORIGINS` (lista separada por vírgula; padrão `http://localhost:5173,http://localhost:3000`). O preflight `OPTIONS` é respondido antes da validação do token, sem credenciais e sem `*`. Em QA e PROD defina as origens reais do `web-app`.
+
 `GET /health` informa se chave do provedor e token interno estão configurados. `POST /v1/images/analyze` exige `Authorization: Bearer <INTERNAL_API_TOKEN>` e formulário com `image`, `purpose` e, opcionalmente, `request_id`, `context_title` e `max_alt_chars` (qualquer inteiro positivo; padrão 150). A legenda é gerada em pt-BR. O Swagger local fica em `/docs`.
 
 Configure a chave Gemini em `GEMINI_API_KEY` (a mesma dos demais serviços; `GEMINI_AI_ACCESSIBILITY_KEY` e `GOOGLE_API_KEY` ainda funcionam como nomes legados, nessa ordem de prioridade). `GROQ_API_KEY` (ou o legado `GROQ_AI_ACCESSIBILITY_KEY`) ativa o GroqCloud como fallback em falhas técnicas. Com `GROQ_MODEL` vazio, usa `qwen/qwen3.8-27b`. GroqCloud e xAI/Grok são serviços diferentes.
