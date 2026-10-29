@@ -7,6 +7,7 @@ from uuid import uuid4
 
 from ai_lib.registry import RegistryClient, RetryPolicy
 from fastapi import FastAPI, File, Form, HTTPException, Security, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from src.agents.base.image_analysis_agent import UnavailableImageAnalysisProvider
@@ -61,6 +62,15 @@ def create_app(
         verifier=auth_verifier or ApiAuthTokenVerifier(
             settings.jwt_jwks_url, settings.jwt_issuer
         ),
+    )
+    # Por último, para ficar por fora do UploadGate: o preflight não carrega
+    # Authorization, e as respostas 401, 413 e 503 do gate também precisam dos headers CORS.
+    application.add_middleware(
+        CORSMiddleware,
+        allow_origins=list(settings.cors_allowed_origins),
+        allow_credentials=False,
+        allow_methods=["GET", "POST", "OPTIONS"],
+        allow_headers=["Authorization", "Content-Type"],
     )
 
     @application.get("/health")

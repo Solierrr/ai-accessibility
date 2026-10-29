@@ -8,6 +8,10 @@ from dotenv import load_dotenv
 _MODEL_PATTERN = re.compile(r"^[A-Za-z0-9._-]+$")
 
 
+def cors_origins(raw: str) -> tuple[str, ...]:
+    return tuple(origin.strip() for origin in raw.split(",") if origin.strip())
+
+
 @dataclass(frozen=True, slots=True)
 class Settings:
     registry_url: str | None = None
@@ -16,6 +20,10 @@ class Settings:
     registry_max_attempts: int = 3
     jwt_jwks_url: str = "http://localhost:8081/.well-known/jwks.json"
     jwt_issuer: str = "solaria-auth"
+    cors_allowed_origins: tuple[str, ...] = (
+        "http://localhost:5173",
+        "http://localhost:3000",
+    )
     gemini_model: str = "gemini-3.5-flash"
     gemini_timeout_seconds: float = 60.0
     max_concurrent_analyses: int = 4
@@ -47,6 +55,12 @@ class Settings:
                 "JWT_JWK_SET_URI", "http://localhost:8081/.well-known/jwks.json"
             ),
             jwt_issuer=os.getenv("JWT_ISSUER", "solaria-auth"),
+            cors_allowed_origins=cors_origins(
+                os.getenv(
+                    "CORS_ALLOWED_ORIGINS",
+                    "http://localhost:5173,http://localhost:3000",
+                )
+            ),
             gemini_model=model,
             gemini_timeout_seconds=timeout,
             max_concurrent_analyses=concurrency,
