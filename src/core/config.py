@@ -10,6 +10,10 @@ from dotenv import load_dotenv
 _MODEL_PATTERN = re.compile(r"^[A-Za-z0-9._-]+$")
 
 
+def cors_origins(raw: str) -> tuple[str, ...]:
+    return tuple(origin.strip() for origin in raw.split(",") if origin.strip())
+
+
 @dataclass(frozen=True, slots=True)
 class Settings:
     google_api_key: str | None
@@ -23,6 +27,10 @@ class Settings:
     debug_admin_subs: str = ""
     jwt_jwks_url: str | None = None
     jwt_issuer: str | None = None
+    cors_allowed_origins: tuple[str, ...] = (
+        "http://localhost:5173",
+        "http://localhost:3000",
+    )
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -60,6 +68,12 @@ class Settings:
             debug_admin_subs=os.getenv("DEBUG_ADMIN_SUBS", ""),
             jwt_jwks_url=os.getenv("JWT_JWKS_URL") or None,
             jwt_issuer=os.getenv("JWT_ISSUER") or None,
+            cors_allowed_origins=cors_origins(
+                os.getenv(
+                    "CORS_ALLOWED_ORIGINS",
+                    "http://localhost:5173,http://localhost:3000",
+                )
+            ),
         )
 
     @property
