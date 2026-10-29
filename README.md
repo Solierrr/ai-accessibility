@@ -79,6 +79,8 @@ O `web-app` ainda não tem upload conectado a esta API. Para testar agora, envie
 
 ## API
 
+O navegador só chama a API a partir das origens de `CORS_ALLOWED_ORIGINS` (lista separada por vírgula; padrão `http://localhost:5173,http://localhost:3000`). O preflight `OPTIONS` é respondido antes da validação do JWT, sem credenciais e sem `*`. Em QA e PROD defina as origens reais do `web-app`.
+
 `GET /health` informa se a configuração dos provedores e do validador JWT está presente. `POST /v1/images/analyze` exige `Authorization: Bearer <accessToken>` obtido no login do `api-auth`, além de formulário com `image`, `purpose` (`product`, `company_profile` ou `professional_profile`) e, opcionalmente, `request_id`, `context_title` e `max_alt_chars` (qualquer inteiro positivo; padrão 150). A legenda é gerada em pt-BR. O Swagger local fica em `/docs`: em **Authorize**, cole apenas o `accessToken`, sem `Bearer`. O token compartilhado `INTERNAL_API_TOKEN` não é mais utilizado.
 
 Para teste local, execute o `api-auth` com seu JWKS público em `http://localhost:8081/.well-known/jwks.json` e obtenha um `accessToken` por `POST /auth/login`. Configure `JWT_JWK_SET_URI` se a URL for diferente e `JWT_ISSUER` se o emissor não for `solaria-auth`. Esta API valida a assinatura RS256, o emissor, a expiração, o tipo `access` e as identidades de usuário e sessão. Se o JWKS estiver indisponível, responde 503 sem processar a imagem. Como a verificação é local, revogação de sessão ou bloqueio da conta no `api-auth` só passam a valer aqui quando o access token expirar; a integração com uma verificação online de sessão ainda não está definida.
