@@ -9,12 +9,13 @@ PY ?= .venv/Scripts/python
 else
 PY ?= .venv/bin/python
 endif
-INSTALL_CMD   ?= python -m venv .venv && $(PY) -m pip install -r requirements.txt ruff pytest pytest-cov
+INSTALL_CMD   ?= python -m venv .venv && $(PY) -m pip install -r requirements.txt ruff pytest pytest-cov pyyaml
 DEV_CMD       ?= $(PY) -m uvicorn src.api.app:app --host 127.0.0.1 --port 8080 --reload
 BUILD_CMD     ?= $(PY) -m compileall -q src tests
 TEST_CMD      ?= $(PY) -m pytest tests
 LINT_CMD      ?= $(PY) -m ruff check src tests && $(PY) -m ruff format --check src tests
 FORMAT_CMD    ?= $(PY) -m ruff format src tests
+OPENAPI_CMD   ?= $(PY) scripts/export_openapi.py
 CLEAN_PATHS   ?= .venv .pytest_cache .ruff_cache .mypy_cache
 DOCTOR_TOOLS  ?= git python
 
@@ -31,7 +32,7 @@ INFISICAL ?= infisical
 endif
 
 .DEFAULT_GOAL := help
-.PHONY: help verify-vault vault env dev install build test lint format clean doctor ci
+.PHONY: help verify-vault vault env dev install build test lint format openapi clean doctor ci
 
 help: ## Show the available commands
 	@awk 'BEGIN {FS = ":.*## "; printf "Usage: make <target>\n\n"} /^[a-zA-Z0-9_-]+:.*## / {printf "  %-18s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -78,6 +79,9 @@ lint: ## Run the linter
 
 format: ## Format the code
 	$(if $(strip $(FORMAT_CMD)),set -e; $(FORMAT_CMD),@echo "format: not configured for this repository")
+
+openapi: ## Export the OpenAPI contract to openapi.yaml
+	$(if $(strip $(OPENAPI_CMD)),set -e; $(OPENAPI_CMD),@echo "openapi: not configured for this repository")
 
 clean: ## Remove build outputs (CLEAN_PATHS)
 	$(if $(strip $(CLEAN_PATHS)),rm -rf $(CLEAN_PATHS),@echo "clean: not configured for this repository")

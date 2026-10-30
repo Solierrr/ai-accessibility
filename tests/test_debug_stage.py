@@ -20,6 +20,7 @@ from tests.test_debug import (
     ADMIN_TOKEN,
     CAPTION,
     OUTRO,
+    SERVICE_KEY,
     FakeProvider,
     fake_decode,
     make_settings,
@@ -161,7 +162,7 @@ class LlmCallsInTheTrace(unittest.TestCase):
                     "/v1/images/analyze",
                     data={"purpose": "product"},
                     files={"image": ("p.png", valid_image(), "image/png")},
-                    headers={"Authorization": "Bearer test-secret"},
+                    headers={"X-Service-Key": SERVICE_KEY},
                 )
 
         self.assertEqual(asyncio.run(run()).status_code, 200)
@@ -247,7 +248,7 @@ class StageReplay(unittest.TestCase):
 
         self.assertEqual(response.status_code, 404)
 
-    def test_invalid_bodies_are_400(self) -> None:
+    def test_invalid_bodies_are_422(self) -> None:
         for change in (
             {"run_id": "x"},
             {"node": "Nó Inválido"},
@@ -255,8 +256,7 @@ class StageReplay(unittest.TestCase):
         ):
             with self.subTest(change=change):
                 response = self.client.stage({**body(self.run_id), **change})
-                self.assertEqual(response.status_code, 400)
-                self.assertEqual(response.json()["errorCode"], "VALIDATION_ERROR")
+                self.assertEqual(response.status_code, 422)
 
     def test_oversized_body_is_413(self) -> None:
         response = self.client._request(
@@ -427,7 +427,7 @@ class ProviderCapture(unittest.TestCase):
             async with httpx.AsyncClient(
                 transport=httpx.MockTransport(_handler(payload))
             ) as client:
-                provider = GeminiVisionProvider(Settings("k", "t"), client)
+                provider = GeminiVisionProvider(Settings("k"), client)
                 capture = CallCapture()
                 await provider.caption(
                     self.image(),
@@ -462,7 +462,7 @@ class ProviderCapture(unittest.TestCase):
             async with httpx.AsyncClient(
                 transport=httpx.MockTransport(handle)
             ) as client:
-                provider = GeminiVisionProvider(Settings("k", "t"), client)
+                provider = GeminiVisionProvider(Settings("k"), client)
                 capture = CallCapture()
                 await provider.caption(
                     self.image(),
@@ -487,7 +487,7 @@ class ProviderCapture(unittest.TestCase):
             async with httpx.AsyncClient(
                 transport=httpx.MockTransport(handle)
             ) as client:
-                provider = GeminiVisionProvider(Settings("k", "t"), client)
+                provider = GeminiVisionProvider(Settings("k"), client)
                 capture = CallCapture()
                 image = self.image()
                 with self.assertRaises(ProviderError):
@@ -532,9 +532,7 @@ class ProviderCapture(unittest.TestCase):
             async with httpx.AsyncClient(
                 transport=httpx.MockTransport(handle)
             ) as client:
-                provider = GroqVisionProvider(
-                    Settings(None, "t", groq_api_key="g"), client
-                )
+                provider = GroqVisionProvider(Settings(None, groq_api_key="g"), client)
                 capture = CallCapture()
                 await provider.moderate(self.image(), prompt="OUTRO", capture=capture)
                 return capture
@@ -552,7 +550,7 @@ class ProviderCapture(unittest.TestCase):
             async with httpx.AsyncClient(
                 transport=httpx.MockTransport(_handler(payload))
             ) as client:
-                provider = GeminiVisionProvider(Settings("k", "t"), client)
+                provider = GeminiVisionProvider(Settings("k"), client)
                 return await provider.caption(
                     self.image(), purpose="product", title="", max_alt_chars=100
                 )

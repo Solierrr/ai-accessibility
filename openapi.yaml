@@ -1,0 +1,362 @@
+openapi: 3.1.0
+info:
+  title: Solaria — ai-accessibility
+  description: 'Analisa as imagens enviadas à plataforma antes da publicação: verifica se o conteúdo é adequado e, quando a imagem é aprovada, gera uma descrição curta para leitores de tela. Não armazena nem publica imagens. Atende só outros serviços: autentique com a chave de serviço no cabeçalho X-Service-Key.'
+  contact:
+    name: Solaria
+    url: https://github.com/Solierrr
+  license:
+    name: CC0-1.0
+    url: https://creativecommons.org/publicdomain/zero/1.0/
+  version: 0.2.0 # x-release-please-version
+servers:
+- url: https://ai-accessibility.onrender.com
+  description: QA
+- url: http://localhost:8080
+  description: Local
+paths:
+  /health:
+    get:
+      tags:
+      - Saúde
+      summary: Indica se o processo está vivo
+      description: Responde enquanto o processo estiver de pé, sem consultar dependências.
+      operationId: getHealth
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthStatus'
+        '500':
+          description: Erro interno inesperado
+          content: &id001
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+      security: []
+      x-error-codes:
+      - INTERNAL_ERROR
+  /ready:
+    get:
+      tags:
+      - Saúde
+      summary: Indica se o serviço está pronto para atender
+      description: Pronto quando há ao menos um provedor de visão configurado.
+      operationId: getReady
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReadyStatus'
+        '503':
+          description: Serviço não pronto
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReadyStatus'
+        '500':
+          description: Erro interno inesperado
+          content: *id001
+      security: []
+      x-error-codes:
+      - INTERNAL_ERROR
+  /v1/images/analyze:
+    post:
+      tags:
+      - Análise de imagens
+      summary: Analisa uma imagem e sugere o texto alternativo
+      description: Valida a imagem, avalia o conteúdo e, quando aprovada, gera uma descrição curta em pt-BR. Imagem recusada ou sem descrição possível é resultado (decision rejected ou review_required), não erro. Aceita só os serviços chamadores configurados; nada é armazenado.
+      operationId: analyzeImage
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Body_analyzeImage'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnalysisResponse'
+        '401':
+          description: Chave de serviço ausente ou inválida
+          content: *id001
+        '403':
+          description: Serviço chamador não autorizado nesta rota
+          content: *id001
+        '413':
+          description: Upload excede o limite
+          content: *id001
+        '422':
+          description: Campos do formulário inválidos
+          content: *id001
+        '503':
+          description: Provedor de visão não configurado
+          content: *id001
+        '500':
+          description: Erro interno inesperado
+          content: *id001
+      security:
+      - serviceKey: []
+      x-error-codes:
+      - UNAUTHENTICATED
+      - FORBIDDEN
+      - PAYLOAD_TOO_LARGE
+      - VALIDATION_FAILED
+      - DEPENDENCY_UNAVAILABLE
+      - INTERNAL_ERROR
+components:
+  schemas:
+    AnalysisResponse:
+      properties:
+        analysis_id:
+          type: string
+          title: Analysis Id
+          description: Id da análise.
+          examples:
+          - 0b6f3c1e-2d4a-4f7e-9c1a-5e8d7b2a1f30
+        request_id:
+          type: string
+          title: Request Id
+          description: Id de correlação recebido ou gerado.
+          examples:
+          - upload-1
+        decision:
+          $ref: '#/components/schemas/Decision'
+          description: Resultado da análise.
+        reason_codes:
+          items:
+            type: string
+          type: array
+          title: Reason Codes
+          description: Motivos da decisão; vazio quando aprovada.
+          examples:
+          - - PROVIDER_UNAVAILABLE
+        risk_categories:
+          items:
+            type: string
+          type: array
+          title: Risk Categories
+          description: Categorias de risco identificadas.
+          examples:
+          - []
+        alt_text:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Alt Text
+          description: Texto alternativo sugerido, só quando aprovada.
+          examples:
+          - Painel solar azul sobre uma mesa.
+        policy_version:
+          type: string
+          title: Policy Version
+          description: Versão da política de moderação.
+        model_version:
+          type: string
+          title: Model Version
+          description: Modelos usados na análise.
+      type: object
+      required:
+      - analysis_id
+      - request_id
+      - decision
+      - reason_codes
+      - risk_categories
+      - alt_text
+      - policy_version
+      - model_version
+      title: AnalysisResponse
+    Body_analyzeImage:
+      properties:
+        image:
+          type: string
+          contentMediaType: application/octet-stream
+          title: Image
+          description: Imagem JPEG, PNG ou WebP, até 8 MiB.
+        purpose:
+          $ref: '#/components/schemas/Purpose'
+          description: Onde a imagem será usada.
+        max_alt_chars:
+          type: integer
+          minimum: 1.0
+          title: Max Alt Chars
+          description: Tamanho máximo do texto alternativo.
+          default: 150
+        request_id:
+          type: string
+          maxLength: 100
+          title: Request Id
+          description: Id de correlação do chamador ([A-Za-z0-9._:-]).
+          default: ''
+        context_title:
+          type: string
+          maxLength: 120
+          title: Context Title
+          description: Título do conteúdo, como contexto.
+          default: ''
+      type: object
+      required:
+      - image
+      - purpose
+      title: Body_analyzeImage
+    Decision:
+      type: string
+      enum:
+      - approved
+      - review_required
+      - rejected
+      title: Decision
+    HealthStatus:
+      properties:
+        status:
+          type: string
+          title: Status
+          description: UP quando o processo responde.
+          examples:
+          - UP
+        version:
+          type: string
+          title: Version
+          description: Versão do release.
+          examples:
+          - 0.2.0
+      type: object
+      required:
+      - status
+      - version
+      title: HealthStatus
+    Purpose:
+      type: string
+      enum:
+      - product
+      - company_profile
+      - professional_profile
+      - other
+      title: Purpose
+    ReadyStatus:
+      properties:
+        status:
+          type: string
+          title: Status
+          description: UP com um provedor de visão configurado; DOWN (503) sem nenhum.
+          examples:
+          - UP
+      type: object
+      required:
+      - status
+      title: ReadyStatus
+    ProblemDetail:
+      properties:
+        type:
+          description: Sempre about:blank.
+          examples:
+          - about:blank
+          title: Type
+          type: string
+        title:
+          description: O mesmo valor de errorCode.
+          examples:
+          - VALIDATION_FAILED
+          title: Title
+          type: string
+        status:
+          description: Código HTTP.
+          examples:
+          - 422
+          title: Status
+          type: integer
+        errorCode:
+          description: Código estável do catálogo de erros, traduzido pelo front.
+          examples:
+          - VALIDATION_FAILED
+          title: Errorcode
+          type: string
+        detail:
+          description: Explicação para quem depura, em português; o front não exibe.
+          examples:
+          - Erro de validação nos campos da requisição.
+          title: Detail
+          type: string
+        instance:
+          description: Caminho da requisição.
+          examples:
+          - /v1/images/analyze
+          title: Instance
+          type: string
+        timestamp:
+          description: Momento do erro, em UTC.
+          format: date-time
+          title: Timestamp
+          type: string
+        traceId:
+          anyOf:
+          - type: string
+          - type: 'null'
+          default: null
+          description: Id do trace, quando houver instrumentação.
+          title: Traceid
+        errors:
+          anyOf:
+          - items:
+              $ref: '#/components/schemas/ProblemFieldError'
+            type: array
+          - type: 'null'
+          default: null
+          description: Erros por campo, só em validação.
+          title: Errors
+      required:
+      - type
+      - title
+      - status
+      - errorCode
+      - detail
+      - instance
+      - timestamp
+      title: ProblemDetail
+      type: object
+    ProblemFieldError:
+      properties:
+        field:
+          description: Campo com erro.
+          examples:
+          - request_id
+          title: Field
+          type: string
+        errorCode:
+          description: Código estável do erro do campo.
+          examples:
+          - VALIDATION_FAILED
+          title: Errorcode
+          type: string
+        detail:
+          description: Explicação para quem depura.
+          examples:
+          - request_id inválido.
+          title: Detail
+          type: string
+      required:
+      - field
+      - errorCode
+      - detail
+      title: ProblemFieldError
+      type: object
+  securitySchemes:
+    serviceKey:
+      type: apiKey
+      description: Chave do serviço chamador (SERVICE_KEY dele).
+      in: header
+      name: X-Service-Key
+tags:
+- name: Análise de imagens
+  description: Moderação e texto alternativo de imagens.
+- name: Saúde
+  description: Vivo e pronto do serviço.
+security:
+- serviceKey: []
