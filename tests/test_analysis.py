@@ -244,7 +244,8 @@ class ApiTests(unittest.TestCase):
                     files=files,
                     headers={"Authorization": "Bearer test-secret"},
                 )
-                self.assertEqual(invalid_limit.status_code, 422)
+                self.assertEqual(invalid_limit.status_code, 400)
+                self.assertEqual(invalid_limit.json()["errorCode"], "VALIDATION_ERROR")
 
                 invalid = await client.post(
                     "/v1/images/analyze",

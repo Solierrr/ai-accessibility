@@ -247,7 +247,7 @@ class StageReplay(unittest.TestCase):
 
         self.assertEqual(response.status_code, 404)
 
-    def test_invalid_bodies_are_422(self) -> None:
+    def test_invalid_bodies_are_400(self) -> None:
         for change in (
             {"run_id": "x"},
             {"node": "Nó Inválido"},
@@ -255,7 +255,8 @@ class StageReplay(unittest.TestCase):
         ):
             with self.subTest(change=change):
                 response = self.client.stage({**body(self.run_id), **change})
-                self.assertEqual(response.status_code, 422)
+                self.assertEqual(response.status_code, 400)
+                self.assertEqual(response.json()["errorCode"], "VALIDATION_ERROR")
 
     def test_oversized_body_is_413(self) -> None:
         response = self.client._request(

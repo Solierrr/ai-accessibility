@@ -139,7 +139,8 @@ mascarado não pode ser reenviado.
 | `404` | Análise expirada, de outro admin, reiniciada ou em outra instância; tentativa inexistente |
 | `409` | O provedor daquela tentativa não está mais configurado |
 | `413` | Corpo acima de 8 MB |
-| `422` | Corpo inválido, ou etapa sem chamada a modelo (`image_validation`, `policy`, `caption_validation`) |
+| `400` | Corpo inválido (`VALIDATION_ERROR`, com `errors[{field, message}]`) |
+| `422` | Etapa sem chamada a modelo (`image_validation`, `policy`, `caption_validation`) |
 
 A imagem enviada fica em memória por **15 minutos**, no máximo 10 análises por admin e 64 MB
 no total; as mais antigas saem primeiro. É por instância: com mais de uma réplica, a
