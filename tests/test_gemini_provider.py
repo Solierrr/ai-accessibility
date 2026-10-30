@@ -53,9 +53,7 @@ class GeminiProviderTests(unittest.TestCase):
             async with httpx.AsyncClient(
                 transport=httpx.MockTransport(handle)
             ) as client:
-                provider = GeminiVisionProvider(
-                    Settings("test-key", "test-secret"), client
-                )
+                provider = GeminiVisionProvider(Settings("test-key"), client)
                 suggestion = await provider.caption(
                     sample_image(), purpose="product", title="", max_alt_chars=10
                 )
@@ -108,9 +106,7 @@ class GeminiProviderTests(unittest.TestCase):
             async with httpx.AsyncClient(
                 transport=httpx.MockTransport(handle)
             ) as client:
-                provider = GeminiVisionProvider(
-                    Settings("test-key", "test-secret"), client
-                )
+                provider = GeminiVisionProvider(Settings("test-key"), client)
                 observation = await provider.moderate(sample_image())
                 self.assertTrue(observation.safety_flagged)
                 self.assertEqual(observation.assessment.confidence, "high")
@@ -127,9 +123,7 @@ class GeminiProviderTests(unittest.TestCase):
                     lambda request: httpx.Response(200, json=response)
                 )
             ) as client:
-                provider = GeminiVisionProvider(
-                    Settings("test-key", "test-secret"), client
-                )
+                provider = GeminiVisionProvider(Settings("test-key"), client)
                 with self.assertRaises(error_type):
                     await provider.moderate(sample_image())
 

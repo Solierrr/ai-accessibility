@@ -1,7 +1,6 @@
 """API interna para análise de imagem; não publica nem armazena arquivos."""
 
 import asyncio
-import hmac
 import logging
 import re
 from enum import StrEnum
@@ -10,10 +9,27 @@ from uuid import uuid4
 
 from fastapi import FastAPI, File, Form, HTTPException, Security, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
 
 from src.api.debug_access import authorize_debug
+from src.api.errors import ApiError, register_error_handlers
+from src.api.openapi import (
+    CONTACT,
+    DESCRIPTION,
+    LICENSE,
+    SERVERS,
+    SWAGGER_UI_PARAMETERS,
+    TAGS,
+    TITLE,
+    install_openapi,
+)
+from src.api.service_auth import (
+    SERVICE_KEY_HEADER,
+    resolve_caller,
+    service_key_header,
+)
 from src.api.upload_gate import UploadGate
 from src.caption.validation import DEFAULT_ALT_TEXT_CHARS
 from src.core.config import Settings
@@ -34,12 +50,23 @@ from src.services.trace import (
     completion_summary,
     llm_calls,
 )
+from src.version import VERSION
 
 logger = logging.getLogger(__name__)
-bearer_scheme = HTTPBearer(
-    auto_error=False,
-    description="Token interno do ai-accessibility. No Swagger, informe só o valor; Bearer é acrescentado automaticamente.",
-)
+# JWT de administrador, só nas rotas de debug (fora do contrato)
+bearer_scheme = HTTPBearer(auto_error=False)
+
+
+class HealthStatus(BaseModel):
+    status: str = Field(description="UP quando o processo responde.", examples=["UP"])
+    version: str = Field(description="Versão do release.", examples=["0.2.0"])
+
+
+class ReadyStatus(BaseModel):
+    status: str = Field(
+        description="UP com um provedor de visão configurado; DOWN (503) sem nenhum.",
+        examples=["UP"],
+    )
 
 
 class Purpose(StrEnum):
@@ -169,21 +196,59 @@ def create_app(
         fallback_provider = GroqVisionProvider(settings)
     semaphore = asyncio.Semaphore(settings.max_concurrent_analyses)
     runs = DebugRunStore()
-    application = FastAPI(title="Solaria AI Accessibility", version="0.1.0")
-    application.add_middleware(UploadGate, token=settings.internal_api_token)
-    # Por último, para ficar por fora do UploadGate: o preflight não carrega
-    # Authorization, e as respostas 401, 413 e 503 do gate também precisam dos headers CORS.
+    application = FastAPI(
+        title=TITLE,
+        description=DESCRIPTION,
+        version=VERSION,
+        contact=CONTACT,
+        license_info=LICENSE,
+        servers=SERVERS,
+        openapi_tags=TAGS,
+        docs_url="/docs" if settings.docs_enabled else None,
+        openapi_url="/openapi.json" if settings.docs_enabled else None,
+        redoc_url=None,
+        swagger_ui_parameters=SWAGGER_UI_PARAMETERS,
+    )
+    install_openapi(application)
+    register_error_handlers(application)
+    analyze_callers = tuple(settings.service_keys)
+    application.add_middleware(
+        UploadGate, service_keys=settings.service_keys, callers=analyze_callers
+    )
     application.add_middleware(
         CORSMiddleware,
         allow_origins=list(settings.cors_allowed_origins),
         allow_credentials=False,
         allow_methods=["GET", "POST", "OPTIONS"],
-        allow_headers=["Authorization", "Content-Type"],
+        allow_headers=["Authorization", "Content-Type", SERVICE_KEY_HEADER],
     )
 
-    @application.get("/health")
-    async def health() -> dict[str, object]:
-        return {"status": "ready" if settings.ready else "not_configured"}
+    @application.get(
+        "/health",
+        response_model=HealthStatus,
+        tags=["Saúde"],
+        summary="Indica se o processo está vivo",
+        description="Responde enquanto o processo estiver de pé, sem consultar dependências.",
+        operation_id="getHealth",
+        openapi_extra={"security": [], "x-error-codes": ["INTERNAL_ERROR"]},
+    )
+    async def health() -> HealthStatus:
+        return HealthStatus(status="UP", version=VERSION)
+
+    @application.get(
+        "/ready",
+        response_model=ReadyStatus,
+        tags=["Saúde"],
+        summary="Indica se o serviço está pronto para atender",
+        description="Pronto quando há ao menos um provedor de visão configurado.",
+        operation_id="getReady",
+        responses={503: {"model": ReadyStatus, "description": "Serviço não pronto"}},
+        openapi_extra={"security": [], "x-error-codes": ["INTERNAL_ERROR"]},
+    )
+    async def ready() -> JSONResponse:
+        if not settings.ready:
+            return JSONResponse({"status": "DOWN"}, status_code=503)
+        return JSONResponse({"status": "UP"})
 
     async def run_analysis(
         image: UploadFile,
@@ -195,12 +260,24 @@ def create_app(
     ) -> tuple[AnalysisResponse, bytes]:
         """Parte comum às rotas `analyze` e `debug_analyze`, depois da autenticação."""
         if not (settings.google_api_key or settings.groq_api_key):
-            raise HTTPException(
-                status_code=503, detail="Provedor de visão não configurado"
+            raise ApiError(
+                503, "DEPENDENCY_UNAVAILABLE", "Provedor de visão não configurado."
             )
         if request_id and not re.fullmatch(r"[A-Za-z0-9._:-]{1,100}", request_id):
-            raise HTTPException(status_code=422, detail="request_id inválido")
+            raise ApiError(
+                422,
+                "VALIDATION_FAILED",
+                "Erro de validação nos campos da requisição.",
+                errors=[
+                    {
+                        "field": "request_id",
+                        "errorCode": "VALIDATION_FAILED",
+                        "detail": "request_id inválido.",
+                    }
+                ],
+            )
 
+        # Leitura limitada. O proxy HTTP de produção também deve limitar o corpo da requisição.
         content = await image.read(MAX_UPLOAD_BYTES + 1)
         await image.close()
         async with semaphore:
@@ -216,24 +293,57 @@ def create_app(
             )
         return response, content
 
-    @application.post("/v1/images/analyze", response_model=AnalysisResponse)
+    @application.post(
+        "/v1/images/analyze",
+        response_model=AnalysisResponse,
+        tags=["Análise de imagens"],
+        summary="Analisa uma imagem e sugere o texto alternativo",
+        description=(
+            "Valida a imagem, avalia o conteúdo e, quando aprovada, gera uma descrição "
+            "curta em pt-BR. Imagem recusada ou sem descrição possível é resultado "
+            "(decision rejected ou review_required), não erro. Aceita só os serviços "
+            "chamadores configurados; nada é armazenado."
+        ),
+        operation_id="analyzeImage",
+        responses={
+            401: {"description": "Chave de serviço ausente ou inválida"},
+            403: {"description": "Serviço chamador não autorizado nesta rota"},
+            413: {"description": "Upload excede o limite"},
+            422: {"description": "Campos do formulário inválidos"},
+            503: {"description": "Provedor de visão não configurado"},
+        },
+        openapi_extra={
+            "x-error-codes": [
+                "UNAUTHENTICATED",
+                "FORBIDDEN",
+                "PAYLOAD_TOO_LARGE",
+                "VALIDATION_FAILED",
+                "DEPENDENCY_UNAVAILABLE",
+                "INTERNAL_ERROR",
+            ]
+        },
+    )
     async def analyze(
-        image: Annotated[UploadFile, File()],
-        purpose: Annotated[Purpose, Form()],
-        max_alt_chars: Annotated[int, Form(ge=1)] = DEFAULT_ALT_TEXT_CHARS,
-        request_id: Annotated[str, Form(max_length=100)] = "",
-        context_title: Annotated[str, Form(max_length=120)] = "",
-        credentials: Annotated[
-            HTTPAuthorizationCredentials | None, Security(bearer_scheme)
-        ] = None,
+        image: Annotated[
+            UploadFile, File(description="Imagem JPEG, PNG ou WebP, até 8 MiB.")
+        ],
+        purpose: Annotated[Purpose, Form(description="Onde a imagem será usada.")],
+        max_alt_chars: Annotated[
+            int, Form(ge=1, description="Tamanho máximo do texto alternativo.")
+        ] = DEFAULT_ALT_TEXT_CHARS,
+        request_id: Annotated[
+            str,
+            Form(
+                max_length=100,
+                description="Id de correlação do chamador ([A-Za-z0-9._:-]).",
+            ),
+        ] = "",
+        context_title: Annotated[
+            str, Form(max_length=120, description="Título do conteúdo, como contexto.")
+        ] = "",
+        service_key: Annotated[str | None, Security(service_key_header)] = None,
     ) -> AnalysisResponse:
-        if not settings.internal_api_token:
-            raise HTTPException(
-                status_code=503, detail="Autenticação interna não configurada"
-            )
-        supplied = credentials.credentials if credentials else ""
-        if not hmac.compare_digest(supplied, settings.internal_api_token):
-            raise HTTPException(status_code=401, detail="Credencial interna inválida")
+        resolve_caller(service_key, settings.service_keys, analyze_callers)
         response, _ = await run_analysis(
             image, purpose, max_alt_chars, request_id, context_title
         )

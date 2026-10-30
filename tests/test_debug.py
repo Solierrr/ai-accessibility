@@ -15,7 +15,7 @@ from tests.test_analysis import assessment, valid_image
 
 ADMIN = "11111111-1111-4111-8111-111111111111"
 OUTRO = "22222222-2222-4222-8222-222222222222"
-INTERNAL_TOKEN = "test-secret"
+SERVICE_KEY = "s" * 32
 ADMIN_TOKEN = "jwt-admin"
 CAPTION = "Painel solar azul sobre uma mesa."
 DEBUG = "/debug/images/analyze"
@@ -53,7 +53,7 @@ def fake_decode(token: str, *, jwks_url: str, issuer: str) -> str | None:
 def make_settings(**overrides: object) -> Settings:
     data = {
         "google_api_key": "test-key",
-        "internal_api_token": INTERNAL_TOKEN,
+        "service_keys": {"api-core": SERVICE_KEY},
         "environment": "QA",
         "debug_admin_subs": ADMIN,
         "jwt_jwks_url": "http://jwks.test/.well-known/jwks.json",
@@ -110,8 +110,8 @@ class AccessTests(unittest.TestCase):
         self.assertEqual(post_debug(make_settings(), token=None).status_code, 401)
         self.assertEqual(post_debug(make_settings(), token="outro").status_code, 401)
 
-    def test_internal_token_does_not_open_the_route(self) -> None:
-        response = post_debug(make_settings(), token=INTERNAL_TOKEN)
+    def test_service_key_does_not_open_the_route(self) -> None:
+        response = post_debug(make_settings(), token=SERVICE_KEY)
         self.assertEqual(response.status_code, 401)
 
     def test_without_jwt_configuration_is_401(self) -> None:

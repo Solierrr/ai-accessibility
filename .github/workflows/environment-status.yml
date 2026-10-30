@@ -12,6 +12,7 @@ jobs:
       environment: QA
       check: http
       url: https://ai-accessibility.onrender.com
+      ready_path: /ready
 
   production:
     permissions:
