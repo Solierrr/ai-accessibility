@@ -17,6 +17,7 @@ from src.api.debug_access import authorize_debug
 from src.api.upload_gate import UploadGate
 from src.caption.validation import DEFAULT_ALT_TEXT_CHARS
 from src.core.config import Settings
+from src.core.observability.observability import setup_observability
 from src.image.validation import MAX_UPLOAD_BYTES, ImageValidationError, validate_image
 from src.providers.capture import CallCapture
 from src.providers.gemini import (
@@ -170,6 +171,8 @@ def create_app(
     semaphore = asyncio.Semaphore(settings.max_concurrent_analyses)
     runs = DebugRunStore()
     application = FastAPI(title="Solaria AI Accessibility", version="0.1.0")
+    # logo após criar a app -> os spans e métricas cobrem todas as rotas
+    setup_observability(application, "ai-accessibility")
     application.add_middleware(UploadGate, token=settings.internal_api_token)
     # Por último, para ficar por fora do UploadGate: o preflight não carrega
     # Authorization, e as respostas 401, 413 e 503 do gate também precisam dos headers CORS.
