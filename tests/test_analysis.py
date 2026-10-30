@@ -56,14 +56,24 @@ class FakeProvider:
         self.caption_calls = 0
         self.fail_moderation = False
 
-    async def moderate(self, image):
+    def _record(self, prompt, capture, default):
+        self.last_prompt = prompt
+        if capture is not None:
+            record = capture.begin(prompt or default, self.model_version)
+            record.done(tokens_in=10, tokens_out=5)
+
+    async def moderate(self, image, *, prompt=None, capture=None):
         if self.fail_moderation:
             raise ProviderError("Falha de teste")
+        self._record(prompt, capture, "MODERATION-PROMPT")
         return ModerationObservation(self.visual, False)
 
-    async def caption(self, image, *, purpose, title, max_alt_chars):
+    async def caption(
+        self, image, *, purpose, title, max_alt_chars, prompt=None, capture=None
+    ):
         self.caption_calls += 1
         self.last_max_alt_chars = max_alt_chars
+        self._record(prompt, capture, "CAPTION-PROMPT")
         return CaptionSuggestion(alt_text=self.caption_text, uncertain=False)
 
 

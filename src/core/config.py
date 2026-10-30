@@ -11,11 +11,15 @@ from dotenv import load_dotenv
 _MODEL_PATTERN = re.compile(r"^[A-Za-z0-9._-]+$")
 SERVICE_CALLERS: tuple[str, ...] = ()
 MIN_SERVICE_KEY_LENGTH = 32
-DEFAULT_CORS_ALLOWED_ORIGINS = "http://localhost:3000,http://localhost:5173"
+DEFAULT_CORS_ALLOWED_ORIGINS = "http://localhost:5173,http://localhost:3000"
 
 
 def service_key_variable(caller: str) -> str:
     return "SERVICE_KEY_" + caller.upper().replace("-", "_")
+
+
+def cors_origins(raw: str) -> tuple[str, ...]:
+    return tuple(origin.strip() for origin in raw.split(",") if origin.strip())
 
 
 @dataclass(frozen=True, slots=True)
@@ -28,9 +32,11 @@ class Settings:
     groq_api_key: str | None = None
     groq_model: str = "qwen/qwen3.8-27b"
     docs_enabled: bool = True
-    cors_allowed_origins: tuple[str, ...] = tuple(
-        DEFAULT_CORS_ALLOWED_ORIGINS.split(",")
-    )
+    environment: str = "LOCAL"
+    debug_admin_subs: str = ""
+    jwt_jwks_url: str | None = None
+    jwt_issuer: str | None = None
+    cors_allowed_origins: tuple[str, ...] = cors_origins(DEFAULT_CORS_ALLOWED_ORIGINS)
 
     def __post_init__(self) -> None:
         for caller, key in self.service_keys.items():
@@ -77,12 +83,12 @@ class Settings:
             ),
             groq_model=groq_model,
             docs_enabled=os.getenv("DOCS_ENABLED", "true").strip().lower() != "false",
-            cors_allowed_origins=tuple(
-                origin.strip()
-                for origin in (
-                    os.getenv("CORS_ALLOWED_ORIGINS") or DEFAULT_CORS_ALLOWED_ORIGINS
-                ).split(",")
-                if origin.strip()
+            environment=os.getenv("ENVIRONMENT") or "LOCAL",
+            debug_admin_subs=os.getenv("DEBUG_ADMIN_SUBS", ""),
+            jwt_jwks_url=os.getenv("JWT_JWKS_URL") or None,
+            jwt_issuer=os.getenv("JWT_ISSUER") or None,
+            cors_allowed_origins=cors_origins(
+                os.getenv("CORS_ALLOWED_ORIGINS") or DEFAULT_CORS_ALLOWED_ORIGINS
             ),
         )
 

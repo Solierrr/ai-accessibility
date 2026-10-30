@@ -33,11 +33,15 @@ A resposta inclui `analysis_id`, `request_id`, `decision`, `reason_codes`, `risk
 
 ## Configuração e execução local
 
-Use `.env.example` como referência. Configure `SERVICE_KEY_<CHAMADOR>` para cada serviço chamador aceito (no mínimo 32 caracteres) e pelo menos uma chave de provedor: `GEMINI_API_KEY` ou `GROQ_API_KEY` (os nomes `GEMINI_AI_ACCESSIBILITY_KEY`, `GOOGLE_API_KEY` e `GROQ_AI_ACCESSIBILITY_KEY` seguem aceitos como legados). `GEMINI_MODEL` e `GROQ_MODEL` definem os modelos; o padrão do GroqCloud é `qwen/qwen3.8-27b`. GroqCloud não é xAI/Grok. As configurações também incluem timeout e concorrência. Nunca copie credenciais para documentação ou código.
+Use `.env.example` como referência. Configure `SERVICE_KEY_<CHAMADOR>` para cada serviço chamador aceito (no mínimo 32 caracteres) e pelo menos uma chave de provedor: `GEMINI_API_KEY` ou `GROQ_API_KEY` (os nomes `GEMINI_AI_ACCESSIBILITY_KEY`, `GOOGLE_API_KEY` e `GROQ_AI_ACCESSIBILITY_KEY` seguem aceitos como legados). `CORS_ALLOWED_ORIGINS` lista as origens do navegador permitidas (o `CORSMiddleware` fica por fora do `UploadGate`, para o preflight não exigir chave). `GEMINI_MODEL` e `GROQ_MODEL` definem os modelos; o padrão do GroqCloud é `qwen/qwen3.8-27b`. GroqCloud não é xAI/Grok. As configurações também incluem timeout e concorrência. Nunca copie credenciais para documentação ou código.
 
 No ambiente virtual local, execute `./.venv/Scripts/python.exe -m uvicorn src.api.app:app --host 127.0.0.1 --port 8080` no PowerShell. Consulte `http://127.0.0.1:8080/docs` para a API (contrato em `/openapi.json`; `DOCS_ENABLED=false` desliga os dois), `GET /health` para saber se o processo está vivo e `GET /ready` para saber se há provedor configurado. No Swagger, informe a chave de serviço em **Authorize**. Erros respondem em `application/problem+json` com `errorCode`. O contrato versionado `openapi.yaml` é gerado por `make openapi`. Reinicie o processo após alterar `.env`. O `Dockerfile` também executa o serviço na porta 8080.
 
 O `infra-scripts` pode fornecer variáveis para desenvolvimento local via vault, mas este repositório não deve depender de segredos versionados. Não registre valores de `.env` em saídas de ferramentas, logs ou exemplos.
+
+## Modo debug
+
+`POST /debug/images/analyze` (fora do OpenAPI) roda a mesma análise e devolve também as etapas como `debug.nodes`, registradas por `src/services/trace.py` (`StepRecorder`, passado a `analyze_image` como `trace`). Nunca entram imagem, legenda nem mensagem do provedor; as etapas `moderation` e `caption` trazem o prompt enviado (com PII mascarada), o modelo e os tokens, capturados pelo `CallCapture` (`src/providers/capture.py`) que os provedores recebem só no debug. `POST /debug/images/stage` reexecuta uma dessas etapas com o prompt editado, a partir da imagem guardada em memória por `src/services/debug_runs.py` (15 min, por admin). O acesso é por JWT de admin (`src/api/debug_access.py`): liga com `DEBUG_ADMIN_SUBS` preenchido e `ENVIRONMENT` em `LOCAL`, `DEV`, `QA` ou `PROD`; o token interno não abre a rota. O `UploadGate` aplica o limite de tamanho às rotas de debug. Detalhes em `docs/debug-endpoint.md`; ao criar uma etapa nova em `analyze_image`, registre-a com `note(...)` e atualize esse documento.
 
 ## Invariantes de segurança e acessibilidade
 

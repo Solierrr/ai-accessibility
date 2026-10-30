@@ -10,6 +10,7 @@ from pydantic import ValidationError
 from src.core.config import Settings
 from src.image.validation import ValidatedImage
 from src.moderation.models import CaptionSuggestion, VisionAssessment
+from src.providers.capture import CallCapture
 from src.providers.gemini import ModerationObservation, ProviderBlocked, ProviderError
 from src.providers.prompts import MODERATION_PROMPT, caption_prompt
 
@@ -24,24 +25,41 @@ class GroqVisionProvider:
         self.model_version = f"groq/{settings.groq_model}"
         self._client = client
 
-    async def moderate(self, image: ValidatedImage) -> ModerationObservation:
-        data = await self._generate(image, MODERATION_PROMPT)
+    async def moderate(
+        self,
+        image: ValidatedImage,
+        *,
+        prompt: str | None = None,
+        capture: CallCapture | None = None,
+    ) -> ModerationObservation:
+        data = await self._generate(image, prompt or MODERATION_PROMPT, capture)
         try:
             return ModerationObservation(VisionAssessment.model_validate(data), False)
         except ValidationError as exc:
             raise ProviderError("Resposta de moderação inválida") from exc
 
     async def caption(
-        self, image: ValidatedImage, *, purpose: str, title: str, max_alt_chars: int
+        self,
+        image: ValidatedImage,
+        *,
+        purpose: str,
+        title: str,
+        max_alt_chars: int,
+        prompt: str | None = None,
+        capture: CallCapture | None = None,
     ) -> CaptionSuggestion:
         async def generate_caption(*, retry: bool) -> CaptionSuggestion:
-            prompt = caption_prompt(
-                purpose=purpose,
-                title=title,
-                max_alt_chars=max_alt_chars,
-                retry=retry,
+            text = (
+                prompt
+                if prompt and not retry
+                else caption_prompt(
+                    purpose=purpose,
+                    title=title,
+                    max_alt_chars=max_alt_chars,
+                    retry=retry,
+                )
             )
-            data = await self._generate(image, prompt)
+            data = await self._generate(image, text, capture)
             try:
                 return CaptionSuggestion.model_validate(data)
             except ValidationError as exc:
@@ -55,9 +73,27 @@ class GroqVisionProvider:
             suggestion = await generate_caption(retry=True)
         return suggestion
 
-    async def _generate(self, image: ValidatedImage, prompt: str) -> object:
-        if not self.settings.groq_api_key:
-            raise ProviderError("Groq não configurado")
+    async def _generate(
+        self,
+        image: ValidatedImage,
+        prompt: str,
+        capture: CallCapture | None = None,
+    ) -> object:
+        record = capture.begin(prompt, self.model_version) if capture else None
+        try:
+            data, usage = await self._request(image, prompt)
+        except ProviderError as exc:
+            if record:
+                record.fail(exc)
+            raise
+        if record:
+            record.done(
+                tokens_in=usage.get("prompt_tokens"),
+                tokens_out=usage.get("completion_tokens"),
+            )
+        return data
+
+    def _request_body(self, image: ValidatedImage, prompt: str) -> dict:
         encoded = base64.b64encode(image.content).decode("ascii")
         body = {
             "model": self.settings.groq_model,
@@ -81,53 +117,66 @@ class GroqVisionProvider:
         }
         if self.settings.groq_model == "qwen/qwen3.8-27b":
             body["reasoning_effort"] = "none"
+        return body
+
+    async def _post(self, client: httpx.AsyncClient, body: dict) -> httpx.Response:
         headers = {"Authorization": f"Bearer {self.settings.groq_api_key}"}
         timeout = httpx.Timeout(self.settings.gemini_timeout_seconds)
-
-        async def send(client: httpx.AsyncClient) -> httpx.Response:
-            for attempt in range(2):
-                try:
-                    response = await client.post(
-                        _URL, json=body, headers=headers, timeout=timeout
-                    )
-                except httpx.RequestError as exc:
-                    if attempt == 0:
-                        await asyncio.sleep(0.3)
-                        continue
-                    raise ProviderError("Falha de conexão com Groq") from exc
-                if response.status_code in {500, 502, 503, 504} and attempt == 0:
+        for attempt in range(2):
+            try:
+                response = await client.post(
+                    _URL, json=body, headers=headers, timeout=timeout
+                )
+            except httpx.RequestError as exc:
+                if attempt == 0:
                     await asyncio.sleep(0.3)
                     continue
-                if response.status_code >= 400:
-                    raise ProviderError(
-                        f"Groq retornou HTTP {response.status_code}",
-                        status_code=response.status_code,
-                    )
-                return response
-            raise ProviderError("Groq indisponível")
+                raise ProviderError("Falha de conexão com Groq") from exc
+            if response.status_code in {500, 502, 503, 504} and attempt == 0:
+                await asyncio.sleep(0.3)
+                continue
+            if response.status_code >= 400:
+                raise ProviderError(
+                    f"Groq retornou HTTP {response.status_code}",
+                    status_code=response.status_code,
+                )
+            return response
+        raise ProviderError("Groq indisponível")
 
+    async def _request(self, image: ValidatedImage, prompt: str) -> tuple[object, dict]:
+        if not self.settings.groq_api_key:
+            raise ProviderError("Groq não configurado")
+        body = self._request_body(image, prompt)
         if self._client is None:
             async with httpx.AsyncClient(follow_redirects=False) as client:
-                response = await send(client)
+                response = await self._post(client, body)
         else:
-            response = await send(self._client)
+            response = await self._post(self._client, body)
+        return _parse_response(response)
 
-        try:
-            payload = response.json()
-            choice = payload["choices"][0]
-            if choice.get("finish_reason") == "content_filter" or choice["message"].get(
-                "refusal"
-            ):
-                raise ProviderBlocked("Filtro de segurança do Groq")
-            if choice.get("finish_reason") != "stop":
-                raise ProviderError("Resposta incompleta do Groq")
-            content = choice["message"]["content"]
-            if not isinstance(content, str):
-                raise TypeError("Conteúdo inesperado")
-            return json.loads(content)
-        except ProviderBlocked:
-            raise
-        except ProviderError:
-            raise
-        except (IndexError, KeyError, TypeError, ValueError) as exc:
-            raise ProviderError("Resposta inválida do Groq") from exc
+
+def _check_choice(choice: dict) -> str:
+    if choice.get("finish_reason") == "content_filter" or choice["message"].get(
+        "refusal"
+    ):
+        raise ProviderBlocked("Filtro de segurança do Groq")
+    if choice.get("finish_reason") != "stop":
+        raise ProviderError("Resposta incompleta do Groq")
+    content = choice["message"]["content"]
+    if not isinstance(content, str):
+        raise TypeError("Conteúdo inesperado")
+    return content
+
+
+def _parse_response(response: httpx.Response) -> tuple[object, dict]:
+    try:
+        payload = response.json()
+        content = _check_choice(payload["choices"][0])
+        usage = payload.get("usage")
+        return json.loads(content), usage if isinstance(usage, dict) else {}
+    except ProviderBlocked:
+        raise
+    except ProviderError:
+        raise
+    except (IndexError, KeyError, TypeError, ValueError) as exc:
+        raise ProviderError("Resposta inválida do Groq") from exc
