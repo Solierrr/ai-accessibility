@@ -33,6 +33,7 @@ from src.api.service_auth import (
 from src.api.upload_gate import UploadGate
 from src.caption.validation import DEFAULT_ALT_TEXT_CHARS
 from src.core.config import Settings
+from src.core.observability.observability import setup_observability
 from src.image.validation import MAX_UPLOAD_BYTES, ImageValidationError, validate_image
 from src.providers.capture import CallCapture
 from src.providers.gemini import (
@@ -209,6 +210,8 @@ def create_app(
         redoc_url=None,
         swagger_ui_parameters=SWAGGER_UI_PARAMETERS,
     )
+    # logo após criar a app, nesta ordem -> os erros usam o span criado pela observabilidade
+    setup_observability(application, "ai-accessibility")
     install_openapi(application)
     register_error_handlers(application)
     analyze_callers = tuple(settings.service_keys)
