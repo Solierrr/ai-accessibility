@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.3.0](https://github.com/Solierrr/ai-accessibility/compare/v0.2.0...v0.3.0) (2026-10-30)
+
+
+### Features
+
+* accept the shared gemini and groq key names ([#43](https://github.com/Solierrr/ai-accessibility/issues/43)) ([96fcd4c](https://github.com/Solierrr/ai-accessibility/commit/96fcd4cc41743aa6180176aa27d77b26952c70c8))
+* add opentelemetry signals and problem+json errors ([#49](https://github.com/Solierrr/ai-accessibility/issues/49)) ([1b69d41](https://github.com/Solierrr/ai-accessibility/commit/1b69d4160d13e6ea20553a4c42388e4f7de13e7a))
+* add the local run commands ([03050ad](https://github.com/Solierrr/ai-accessibility/commit/03050ad307eaf8d9a5fdb33b9ebff0581733ba96))
+* allow browser calls with configurable cors ([#47](https://github.com/Solierrr/ai-accessibility/issues/47)) ([b1ea4f2](https://github.com/Solierrr/ai-accessibility/commit/b1ea4f2a7995f67baa5701f6a6831a7ddf1e18c5))
+* debug endpoint ([#44](https://github.com/Solierrr/ai-accessibility/issues/44)) ([987191f](https://github.com/Solierrr/ai-accessibility/commit/987191f3a06363054bfaa9fa88281a275d8f12e3))
+* rerun a single analysis stage with an edited prompt in the debu… ([#46](https://github.com/Solierrr/ai-accessibility/issues/46)) ([2529481](https://github.com/Solierrr/ai-accessibility/commit/252948150c3d79116bcc0f85a613f51a2e88db50))
+* standardize the service contract ([#45](https://github.com/Solierrr/ai-accessibility/issues/45)) ([0f61fe2](https://github.com/Solierrr/ai-accessibility/commit/0f61fe2f6be0605d0a88ea8d06427395b57df253))
+
 ## [0.2.0](https://github.com/Solierrr/ai-accessibility/compare/v0.1.0...v0.2.0) (2026-09-30)
 
 
