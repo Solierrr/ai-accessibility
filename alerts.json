@@ -1,0 +1,9 @@
+{
+  "service": "ai-accessibility",
+  "aliases": [
+    "accessibility",
+    "ai-accessibility"
+  ],
+  "project": "AI",
+  "host": "https://accessibility.solarianetwork.site"
+}
