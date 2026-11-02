@@ -8,7 +8,7 @@ info:
   license:
     name: CC0-1.0
     url: https://creativecommons.org/publicdomain/zero/1.0/
-  version: 0.2.0 # x-release-please-version
+  version: 0.3.0 # x-release-please-version
 servers:
 - url: https://ai-accessibility.onrender.com
   description: QA
