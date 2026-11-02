@@ -7,15 +7,16 @@ from io import BytesIO
 import httpx
 from PIL import Image
 
+from src.agents.base.vision_agent import ModerationObservation, ProviderError
 from src.api.app import create_app
 from src.api.errors import ApiError
-from src.api.service_auth import resolve_caller
-from src.core.config import Settings
+from src.core.config.settings import Settings
+from src.core.security.service_auth import resolve_caller
 from src.moderation.models import CaptionSuggestion, VisionAssessment
 from src.moderation.policy import Decision, decide
-from src.providers.gemini import ModerationObservation, ProviderError
 from src.services.analysis import analyze_image
 from src.version import VERSION
+from tests.fakes import simulate_llm_call
 
 SERVICE_KEY = "k" * 32
 SERVICE_HEADERS = {"X-Service-Key": SERVICE_KEY}
@@ -56,24 +57,22 @@ class FakeProvider:
         self.caption_calls = 0
         self.fail_moderation = False
 
-    def _record(self, prompt, capture, default):
+    async def _record(self, prompt, config, default):
         self.last_prompt = prompt
-        if capture is not None:
-            record = capture.begin(prompt or default, self.model_version)
-            record.done(tokens_in=10, tokens_out=5)
+        await simulate_llm_call(config, prompt or default)
 
-    async def moderate(self, image, *, prompt=None, capture=None):
+    async def moderate(self, image, *, prompt=None, config=None):
         if self.fail_moderation:
             raise ProviderError("Falha de teste")
-        self._record(prompt, capture, "MODERATION-PROMPT")
+        await self._record(prompt, config, "MODERATION-PROMPT")
         return ModerationObservation(self.visual, False)
 
     async def caption(
-        self, image, *, purpose, title, max_alt_chars, prompt=None, capture=None
+        self, image, *, purpose, title, max_alt_chars, prompt=None, config=None
     ):
         self.caption_calls += 1
         self.last_max_alt_chars = max_alt_chars
-        self._record(prompt, capture, "CAPTION-PROMPT")
+        await self._record(prompt, config, "CAPTION-PROMPT")
         return CaptionSuggestion(alt_text=self.caption_text, uncertain=False)
 
 
@@ -189,9 +188,7 @@ class PolicyTests(unittest.TestCase):
 class ApiTests(unittest.TestCase):
     def test_authentication_and_analysis_contract(self) -> None:
         async def run() -> None:
-            settings = Settings(
-                google_api_key="test-key", service_keys={"api-core": SERVICE_KEY}
-            )
+            settings = Settings(service_keys={"api-core": SERVICE_KEY})
             app = create_app(settings, FakeProvider())
             operation = app.openapi()["paths"]["/v1/images/analyze"]["post"]
             self.assertEqual(operation["security"], [{"serviceKey": []}])
@@ -310,7 +307,7 @@ class ApiTests(unittest.TestCase):
 
 class OpenApiTests(unittest.TestCase):
     def test_contract_follows_the_standard(self) -> None:
-        contract = create_app(Settings(google_api_key="test-key")).openapi()
+        contract = create_app(Settings()).openapi()
         self.assertEqual(contract["info"]["title"], "Solaria — ai-accessibility")
         self.assertEqual(contract["info"]["version"], VERSION)
         self.assertEqual(contract["servers"][0]["description"], "QA")
@@ -329,7 +326,7 @@ class OpenApiTests(unittest.TestCase):
 
     def test_docs_can_be_disabled(self) -> None:
         async def run() -> tuple[int, int]:
-            app = create_app(Settings(google_api_key="test-key", docs_enabled=False))
+            app = create_app(Settings(docs_enabled=False))
             async with httpx.AsyncClient(
                 transport=httpx.ASGITransport(app=app), base_url="http://test"
             ) as client:
@@ -342,18 +339,21 @@ class OpenApiTests(unittest.TestCase):
 
 class HealthTests(unittest.TestCase):
     def test_health_and_readiness(self) -> None:
-        async def check(settings: Settings) -> tuple[httpx.Response, httpx.Response]:
-            app = create_app(settings, FakeProvider())
+        async def check(
+            settings: Settings, provider: FakeProvider | None
+        ) -> tuple[httpx.Response, httpx.Response]:
+            app = create_app(settings, provider)
             async with httpx.AsyncClient(
                 transport=httpx.ASGITransport(app=app), base_url="http://test"
             ) as client:
                 return await client.get("/health"), await client.get("/ready")
 
-        health, ready = asyncio.run(check(Settings(google_api_key="test-key")))
+        health, ready = asyncio.run(check(Settings(llm_env={}), FakeProvider()))
         self.assertEqual(health.json(), {"status": "UP", "version": VERSION})
         self.assertEqual((ready.status_code, ready.json()), (200, {"status": "UP"}))
 
-        health, ready = asyncio.run(check(Settings(google_api_key=None)))
+        # sem provedor injetado e sem nenhuma chave de LLM no ambiente
+        health, ready = asyncio.run(check(Settings(llm_env={}), None))
         self.assertEqual(health.status_code, 200)
         self.assertEqual((ready.status_code, ready.json()), (503, {"status": "DOWN"}))
 
@@ -378,7 +378,7 @@ class ServiceKeyTests(unittest.TestCase):
 
     def test_short_key_is_refused_at_startup(self) -> None:
         with self.assertRaises(ValueError):
-            Settings(google_api_key="test-key", service_keys={"api-core": "short"})
+            Settings(service_keys={"api-core": "short"})
 
 
 if __name__ == "__main__":

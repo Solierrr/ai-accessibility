@@ -6,14 +6,13 @@ import httpx
 from PIL import Image
 
 from src.api.app import create_app
-from src.core.config import Settings, cors_origins
+from src.core.config.settings import Settings, cors_origins
 
 ORIGIN = "https://app.example.com"
 
 
 def build_app(**overrides):
     settings = Settings(
-        google_api_key=None,
         service_keys={"api-core": "k" * 32},
         cors_allowed_origins=(ORIGIN,),
         **overrides,
@@ -92,7 +91,7 @@ class CorsTests(unittest.TestCase):
 
     def test_default_origins_are_local_only(self) -> None:
         self.assertEqual(
-            Settings(google_api_key=None).cors_allowed_origins,
+            Settings().cors_allowed_origins,
             ("http://localhost:5173", "http://localhost:3000"),
         )
 

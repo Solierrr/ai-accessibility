@@ -11,11 +11,11 @@ sys.path.insert(0, str(ROOT))
 
 from src.api.app import create_app  # noqa: E402
 from src.api.openapi import build_openapi  # noqa: E402
-from src.core.config import Settings  # noqa: E402
+from src.core.config.settings import Settings  # noqa: E402
 
 
 def main() -> None:
-    app = create_app(Settings(google_api_key=None))
+    app = create_app(Settings(llm_env={}))
     contract = yaml.safe_dump(
         build_openapi(app, include_internal=True),
         allow_unicode=True,

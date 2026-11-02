@@ -3,7 +3,7 @@
 from collections.abc import Collection, Mapping
 
 from src.api.errors import ApiError, problem_response
-from src.api.service_auth import SERVICE_KEY_HEADER, resolve_caller
+from src.core.security.service_auth import SERVICE_KEY_HEADER, resolve_caller
 from src.image.validation import MAX_UPLOAD_BYTES
 
 MAX_REQUEST_BYTES = MAX_UPLOAD_BYTES + 256 * 1024  # margem para campos multipart
