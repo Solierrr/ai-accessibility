@@ -1,3 +1,5 @@
+"""Primeira etapa da pipeline: valida e normaliza bytes de imagem não confiáveis."""
+
 import warnings
 from dataclasses import dataclass
 from hashlib import sha256
@@ -8,7 +10,6 @@ from PIL import Image, ImageOps, UnidentifiedImageError
 MAX_UPLOAD_BYTES = 8 * 1024 * 1024
 MAX_IMAGE_PIXELS = 20_000_000
 MAX_IMAGE_SIDE = 8_192
-MAX_MODEL_SIDE = 800
 ALLOWED_FORMATS = frozenset({"JPEG", "PNG", "WEBP"})
 
 
@@ -72,17 +73,18 @@ def validate_image(content: bytes) -> ValidatedImage:
 
                 source.load()
                 oriented = ImageOps.exif_transpose(source)
-                has_alpha = "A" in oriented.getbands() or "transparency" in oriented.info
-                clean = Image.new("RGB", oriented.size, "white")
-                if has_alpha:
-                    rgba = oriented.convert("RGBA")
-                    clean.paste(rgba, mask=rgba.getchannel("A"))
-                else:
-                    clean.paste(oriented.convert("RGB"))
-                clean.thumbnail((MAX_MODEL_SIDE, MAX_MODEL_SIDE), Image.Resampling.LANCZOS)
+                has_alpha = (
+                    "A" in oriented.getbands() or "transparency" in oriented.info
+                )
+                mode = "RGBA" if has_alpha else "RGB"
+                pixels = oriented.convert(mode)
+
+                # Copiar só pixels para uma imagem nova impede herdar EXIF e outros metadados.
+                clean = Image.new(mode, pixels.size)
+                clean.paste(pixels)
                 output = BytesIO()
-                # Só pixels são copiados: EXIF e demais metadados não chegam ao modelo.
-                clean.save(output, format="JPEG", quality=85, optimize=True)
+                output_format = "PNG" if has_alpha else "JPEG"
+                clean.save(output, format=output_format)
                 normalized = output.getvalue()
                 if len(normalized) > MAX_UPLOAD_BYTES:
                     raise ImageValidationError(
@@ -92,7 +94,7 @@ def validate_image(content: bytes) -> ValidatedImage:
 
                 return ValidatedImage(
                     content=normalized,
-                    mime_type="image/jpeg",
+                    mime_type="image/png" if has_alpha else "image/jpeg",
                     width=clean.width,
                     height=clean.height,
                     source_sha256=sha256(content).hexdigest(),

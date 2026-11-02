@@ -1,0 +1,14 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  release:
+    permissions:
+      contents: read
+      pull-requests: write
+    uses: Solierrr/.github/.github/workflows/docker-publish.yml@main
+    secrets: inherit

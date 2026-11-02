@@ -6,25 +6,18 @@ import httpx
 from PIL import Image
 
 from src.api.app import create_app
-from src.api.auth import InvalidAccessToken
-from src.core.config import Settings, cors_origins
+from src.core.config.settings import Settings, cors_origins
 
 ORIGIN = "https://app.example.com"
 
 
-class RejectingVerifier:
-    async def verify(self, token):
-        raise InvalidAccessToken
-
-
 def build_app(**overrides):
     settings = Settings(
-        registry_url="http://registry.test",
-        registry_token="test-token",
+        service_keys={"api-core": "k" * 32},
         cors_allowed_origins=(ORIGIN,),
         **overrides,
     )
-    return create_app(settings, auth_verifier=RejectingVerifier())
+    return create_app(settings)
 
 
 def png() -> bytes:
@@ -43,20 +36,20 @@ class CorsTests(unittest.TestCase):
 
         return asyncio.run(run())
 
-    def test_preflight_with_authorization_is_answered_without_token(self) -> None:
+    def test_preflight_with_the_service_key_is_answered_without_key(self) -> None:
         response = self.request(
             "OPTIONS",
             "/v1/images/analyze",
             headers={
                 "Origin": ORIGIN,
                 "Access-Control-Request-Method": "POST",
-                "Access-Control-Request-Headers": "authorization",
+                "Access-Control-Request-Headers": "x-service-key",
             },
         )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.headers["access-control-allow-origin"], ORIGIN)
         self.assertIn(
-            "authorization", response.headers["access-control-allow-headers"].lower()
+            "x-service-key", response.headers["access-control-allow-headers"].lower()
         )
         self.assertNotIn("access-control-allow-credentials", response.headers)
 
@@ -79,7 +72,7 @@ class CorsTests(unittest.TestCase):
             "/v1/images/analyze",
             data={"purpose": "product"},
             files={"image": ("panel.png", png(), "image/png")},
-            headers={"Origin": ORIGIN, "Authorization": "Bearer invalid"},
+            headers={"Origin": ORIGIN, "X-Service-Key": "invalid"},
         )
         self.assertEqual(response.status_code, 401)
         self.assertEqual(response.headers["access-control-allow-origin"], ORIGIN)

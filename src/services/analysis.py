@@ -1,54 +1,76 @@
+"""Contrato da resposta e invocação do grafo; sempre falha para revisão ou rejeição."""
+
 from uuid import uuid4
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
-from src.agents.base.image_analysis_agent import ImageAnalysisProvider
+from src.agents.base.vision_agent import VisionProvider
 from src.caption.validation import DEFAULT_ALT_TEXT_CHARS
 from src.moderation.policy import POLICY_VERSION, Decision
-from src.workflow.graph.graph import build_analysis_graph
-from src.workflow.runner import execute_image_analysis
+from src.workflow.graph.graph import analysis_graph
+from src.workflow.observability.debug_tracker import StepRecorder
 
 
 class AnalysisResponse(BaseModel):
     model_config = ConfigDict(use_enum_values=True)
 
-    analysis_id: str
-    request_id: str
-    decision: Decision
-    reason_codes: list[str]
-    risk_categories: list[str]
-    alt_text: str | None
-    policy_version: str
-    model_version: str
+    analysis_id: str = Field(
+        description="Id da análise.", examples=["0b6f3c1e-2d4a-4f7e-9c1a-5e8d7b2a1f30"]
+    )
+    request_id: str = Field(
+        description="Id de correlação recebido ou gerado.", examples=["upload-1"]
+    )
+    decision: Decision = Field(description="Resultado da análise.")
+    reason_codes: list[str] = Field(
+        description="Motivos da decisão; vazio quando aprovada.",
+        examples=[["PROVIDER_UNAVAILABLE"]],
+    )
+    risk_categories: list[str] = Field(
+        description="Categorias de risco identificadas.", examples=[[]]
+    )
+    alt_text: str | None = Field(
+        description="Texto alternativo sugerido, só quando aprovada.",
+        examples=["Painel solar azul sobre uma mesa."],
+    )
+    policy_version: str = Field(description="Versão da política de moderação.")
+    model_version: str = Field(description="Modelos usados na análise.")
 
 
 async def analyze_image(
     content: bytes,
     *,
-    provider: ImageAnalysisProvider,
-    fallback_provider: ImageAnalysisProvider | None = None,
+    provider: VisionProvider,
+    fallback_provider: VisionProvider | None = None,
     request_id: str,
     purpose: str,
     max_alt_chars: int = DEFAULT_ALT_TEXT_CHARS,
     context_title: str = "",
-    workflow=None,
+    trace: StepRecorder | None = None,
 ) -> AnalysisResponse:
-    """Executa o grafo sem persistir imagem ou estado entre requisições."""
-    graph = workflow or build_analysis_graph(provider, fallback_provider)
-    state = await execute_image_analysis(
-        graph,
-        content=content,
-        purpose=purpose,
-        context_title=context_title,
-        max_alt_chars=max_alt_chars,
+    agents = [provider] if fallback_provider is None else [provider, fallback_provider]
+    configurable: dict = {"agents": agents, "tracker": trace}
+    config: dict = {"configurable": configurable}
+    if trace is not None:
+        config["callbacks"] = [trace.capture]
+    analysis_id = str(uuid4())
+    final = await analysis_graph.ainvoke(
+        {
+            "content": content,
+            "purpose": purpose,
+            "max_alt_chars": max_alt_chars,
+            "context_title": context_title,
+            "request_id": request_id,
+            "analysis_id": analysis_id,
+        },
+        config,
     )
     return AnalysisResponse(
-        analysis_id=str(uuid4()),
+        analysis_id=analysis_id,
         request_id=request_id,
-        decision=state.get("decision", Decision.REVIEW_REQUIRED),
-        reason_codes=list(state.get("reason_codes", ("ANALYSIS_INCOMPLETE",))),
-        risk_categories=list(state.get("risk_categories", ())),
-        alt_text=state.get("alt_text") if state.get("decision") == Decision.APPROVED else None,
+        decision=final["decision"],
+        reason_codes=list(final["reason_codes"]),
+        risk_categories=list(final["categories"]),
+        alt_text=final["alt_text"],
         policy_version=POLICY_VERSION,
-        model_version="+".join(state.get("used_models", [])) or provider.model_version,
+        model_version="+".join(final.get("used_models", [])) or provider.model_version,
     )

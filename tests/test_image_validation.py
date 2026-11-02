@@ -1,3 +1,5 @@
+"""Casos de segurança do primeiro bloco, sem provedor de IA."""
+
 import unittest
 from io import BytesIO
 from unittest.mock import patch
@@ -36,16 +38,15 @@ class ImageValidationTests(unittest.TestCase):
                     validate_image(content)
                 self.assertEqual(raised.exception.code, "INVALID_IMAGE")
 
-    def test_composites_transparency_on_white_jpeg(self) -> None:
+    def test_preserves_transparency_in_clean_png(self) -> None:
         image = Image.new("RGBA", (2, 2), (0, 0, 0, 0))
         output = BytesIO()
         image.save(output, format="PNG")
 
         result = validate_image(output.getvalue())
-        self.assertEqual(result.mime_type, "image/jpeg")
+        self.assertEqual(result.mime_type, "image/png")
         with Image.open(BytesIO(result.content)) as clean:
-            self.assertEqual(clean.mode, "RGB")
-            self.assertEqual(clean.getpixel((0, 0)), (255, 255, 255))
+            self.assertEqual(clean.getpixel((0, 0))[3], 0)
 
     def test_limits_are_enforced_before_decoding_full_image(self) -> None:
         with patch("src.image.validation.MAX_UPLOAD_BYTES", 10):
