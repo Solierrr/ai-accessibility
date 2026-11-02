@@ -1,0 +1,82 @@
+"""Configuração lida em cada inicialização; segredos nunca entram no código."""
+
+import os
+import re
+from collections.abc import Mapping
+from dataclasses import dataclass, field
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+_MODEL_PATTERN = re.compile(r"^[A-Za-z0-9._-]+$")
+SERVICE_CALLERS: tuple[str, ...] = ()
+MIN_SERVICE_KEY_LENGTH = 32
+DEFAULT_CORS_ALLOWED_ORIGINS = "http://localhost:5173,http://localhost:3000"
+
+
+def service_key_variable(caller: str) -> str:
+    return "SERVICE_KEY_" + caller.upper().replace("-", "_")
+
+
+def cors_origins(raw: str) -> tuple[str, ...]:
+    return tuple(origin.strip() for origin in raw.split(",") if origin.strip())
+
+
+@dataclass(frozen=True, slots=True)
+class Settings:
+    """Configuração do serviço. As chaves de LLM não ficam aqui: `src/core/llm/keys.py` as lê."""
+
+    service_keys: Mapping[str, str] = field(default_factory=dict)
+    gemini_model: str = "gemini-3.5-flash"
+    gemini_timeout_seconds: float = 60.0
+    max_concurrent_analyses: int = 4
+    groq_model: str = "qwen/qwen3.8-27b"
+    docs_enabled: bool = True
+    environment: str = "LOCAL"
+    debug_admin_subs: str = ""
+    jwt_jwks_url: str | None = None
+    jwt_issuer: str | None = None
+    cors_allowed_origins: tuple[str, ...] = cors_origins(DEFAULT_CORS_ALLOWED_ORIGINS)
+    # Variáveis de onde saem as chaves de LLM; None lê o ambiente do processo.
+    llm_env: Mapping[str, str] | None = None
+
+    def __post_init__(self) -> None:
+        for caller, key in self.service_keys.items():
+            if len(key) < MIN_SERVICE_KEY_LENGTH:
+                raise ValueError(
+                    f"{service_key_variable(caller)} precisa ter ao menos "
+                    f"{MIN_SERVICE_KEY_LENGTH} caracteres"
+                )
+
+    @classmethod
+    def from_env(cls) -> "Settings":
+        load_dotenv(Path(__file__).resolve().parents[3] / ".env", override=False)
+        model = os.getenv("GEMINI_MODEL", "gemini-3.5-flash")
+        if not _MODEL_PATTERN.fullmatch(model):
+            raise ValueError("GEMINI_MODEL contém caracteres inválidos")
+        groq_model = os.getenv("GROQ_MODEL") or "qwen/qwen3.8-27b"
+        if not re.fullmatch(r"[A-Za-z0-9._/-]+", groq_model):
+            raise ValueError("GROQ_MODEL contém caracteres inválidos")
+        timeout = float(os.getenv("GEMINI_TIMEOUT_SECONDS", "60"))
+        concurrency = int(os.getenv("MAX_CONCURRENT_ANALYSES", "4"))
+        if timeout <= 0 or not 1 <= concurrency <= 32:
+            raise ValueError("Configuração de timeout ou concorrência inválida")
+        return cls(
+            service_keys={
+                caller: key
+                for caller in SERVICE_CALLERS
+                if (key := os.getenv(service_key_variable(caller)))
+            },
+            gemini_model=model,
+            gemini_timeout_seconds=timeout,
+            max_concurrent_analyses=concurrency,
+            groq_model=groq_model,
+            docs_enabled=os.getenv("DOCS_ENABLED", "true").strip().lower() != "false",
+            environment=os.getenv("ENVIRONMENT") or "LOCAL",
+            debug_admin_subs=os.getenv("DEBUG_ADMIN_SUBS", ""),
+            jwt_jwks_url=os.getenv("JWT_JWKS_URL") or None,
+            jwt_issuer=os.getenv("JWT_ISSUER") or None,
+            cors_allowed_origins=cors_origins(
+                os.getenv("CORS_ALLOWED_ORIGINS") or DEFAULT_CORS_ALLOWED_ORIGINS
+            ),
+        )

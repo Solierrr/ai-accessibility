@@ -1,5 +1,9 @@
 from src.workflow.state.state import ImageAnalysisState
 
+CONTINUE = "continue"
+FINISH = "finish"
 
-def after_validation(state: ImageAnalysisState) -> str:
-    return "end" if state.get("decision") else "analyze"
+
+def route(state: ImageAnalysisState) -> str:
+    """Segue para a próxima etapa enquanto nenhuma etapa fechou o desfecho."""
+    return FINISH if state.get("decision") is not None else CONTINUE

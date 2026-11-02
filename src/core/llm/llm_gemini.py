@@ -1,29 +1,27 @@
-from langchain_google_genai import (
-    ChatGoogleGenerativeAI,
-    HarmBlockThreshold,
-    HarmCategory,
-)
+from ai_lib.llm import EnvKeyClient, get_chat_model
+from langchain_google_genai import HarmBlockThreshold, HarmCategory
 
-from src.core.config import Settings
+from src.core.config.settings import Settings
+
+_BLOCK = HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE
 
 
-def llm_gemini(settings: Settings, api_key: str) -> ChatGoogleGenerativeAI:
-    return ChatGoogleGenerativeAI(
-        model=settings.gemini_model,
-        api_key=api_key,
+def llm_gemini(settings: Settings, client: EnvKeyClient):
+    model = settings.gemini_model
+    thinking = {"thinking_level": "minimal"} if model.startswith("gemini-3.5-") else {}
+    return get_chat_model(
+        "gemini",
+        model=model,
+        temperature=1.0 if model.startswith("gemini-3") else 0.2,
+        purpose="vision",
+        client=client,
         timeout=settings.gemini_timeout_seconds,
-        max_retries=1,
         max_tokens=4096,
-        temperature=1.0 if settings.gemini_model.startswith("gemini-3") else 0.2,
-        **(
-            {"thinking_level": "minimal"}
-            if settings.gemini_model.startswith("gemini-3.5-")
-            else {}
-        ),
         safety_settings={
-            HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE,
-            HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE,
-            HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE,
-            HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE,
+            HarmCategory.HARM_CATEGORY_HARASSMENT: _BLOCK,
+            HarmCategory.HARM_CATEGORY_HATE_SPEECH: _BLOCK,
+            HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: _BLOCK,
+            HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: _BLOCK,
         },
+        **thinking,
     )
