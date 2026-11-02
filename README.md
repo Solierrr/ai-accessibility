@@ -1,67 +1,38 @@
-# ai-accessibility
+<p align="center">
+  <img src="./assets/readme/banners/fastapi.png" alt="FastAPI" width="100%">
+</p>
 
-API interna para analisar imagens enviadas ao Solaria, identificar conteúdo inadequado e sugerir textos alternativos para acessibilidade
+<p align="center">
+  <img src="./assets/readme/stacks/python.png" width="100" hspace="8" alt="Python" title="Python">
+  <img src="./assets/readme/stacks/pydantic.png" width="100" hspace="8" alt="Pydantic" title="Pydantic">
+  <img src="./assets/readme/stacks/gemini.png" width="100" hspace="8" alt="Gemini" title="Gemini">
+  <img src="./assets/readme/stacks/groq.png" width="100" hspace="8" alt="Groq" title="Groq">
+</p>
 
-<p>
+# Análise e descrição de imagens
 
 [![License](https://img.shields.io/github/license/Solierrr/ai-accessibility)](https://github.com/Solierrr/ai-accessibility/blob/main/LICENSE)
 [![GitHub Last Commit](https://img.shields.io/github/last-commit/Solierrr/ai-accessibility)](https://github.com/Solierrr/ai-accessibility/commits)
-[![GitHub Issues](https://img.shields.io/github/issues/Solierrr/ai-accessibility)](https://github.com/Solierrr/ai-accessibility/issues)
 [![GitHub Pull Requests](https://img.shields.io/github/issues-pr/Solierrr/ai-accessibility)](https://github.com/Solierrr/ai-accessibility/pulls)
-[![GitHub Contributors](https://img.shields.io/github/contributors/Solierrr/ai-accessibility)](https://github.com/Solierrr/ai-accessibility/graphs/contributors)
 [![Release](https://img.shields.io/github/v/release/Solierrr/ai-accessibility)](https://github.com/Solierrr/ai-accessibility/releases)
 
-</p>
+Este serviço analisa imagens para identificar conteúdo inadequado e sugerir uma descrição curta que possa ser lida por tecnologias assistivas. A resposta distingue uma imagem aprovada, uma imagem rejeitada e um caso que precisa de revisão. O objetivo é apoiar a publicação de imagens compreensíveis e adequadas ao contexto em que serão usadas.
 
-<div align="center">
+A aplicação valida o arquivo, consulta um provedor de visão e aplica regras de decisão. Só uma análise aprovada segue para a geração de texto alternativo. O serviço não publica a imagem nem mantém um banco de mídia. A integração precisa respeitar seu contrato de autenticação entre serviços e a revisão feita por quem publica.
 
-<p>
-  <a href="https://github.com/syvixor/skills-icons">
-    <img src="https://skills.syvixor.com/api/icons?i=python,fastapi,pydantic,docker" height="48" alt="Stack do ai-accessibility">
-  </a>
-</p>
+## Aprofunde-se no Projeto!
 
-<p>
+- [OVERVIEW.md](./docs/OVERVIEW.md), finalidade e regras de produto.
+- [ARCHITECTURE.md](./docs/ARCHITECTURE.md), componentes, dados e integrações.
+- [RUNNING.md](./docs/RUNNING.md), preparação e execução local.
+- [API.md](./docs/API.md), autenticação e uso do contrato.
+- [DEPLOY.md](./docs/DEPLOY.md), ambientes e publicação.
+- [STATUS.md](./docs/STATUS.md), limites observados.
+- [Fluxos](./flows/), etapas e casos de erro do repositório.
+- [PENDENCIAS.md](./PENDENCIAS.md), questões para revisão.
 
-[![Python](https://img.shields.io/badge/Python-3776AB?logo=python&logoColor=white)](https://www.python.org/)
-[![FastAPI](https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
-[![Pydantic](https://img.shields.io/badge/Pydantic-E92063?logo=pydantic&logoColor=white)](https://docs.pydantic.dev/)
-[![Pillow](https://img.shields.io/badge/Pillow-333333?logo=python&logoColor=white)](https://python-pillow.org/)
-[![Docker](https://img.shields.io/badge/Docker-2496ED?logo=docker&logoColor=white)](https://www.docker.com/)
+## Contribuindo
 
-</p>
-
-</div>
-
-## Estado atual
-
-O MVP aceita JPEG, PNG ou WebP por `POST /v1/images/analyze`, valida o arquivo, consulta um provedor de IA para sinais de moderação, aplica uma política determinística e, se aprovado, gera uma descrição curta. A resposta é `approved`, `review_required` ou `rejected`. O serviço não armazena nem publica a mídia.
-
-O `web-app` ainda não tem upload conectado a esta API. Para testar agora, envie uma imagem diretamente pela rota interna. Execute localmente com `./.venv/Scripts/python.exe -m uvicorn src.api.app:app --host 127.0.0.1 --port 8080` no PowerShell.
-
-- [AGENTS.md](AGENTS.md): contexto do projeto, arquitetura, fluxo de análise e orientações de manutenção.
-
-## API
-
-O navegador só chama a API a partir das origens de `CORS_ALLOWED_ORIGINS` (lista separada por vírgula; padrão `http://localhost:5173,http://localhost:3000`). O preflight `OPTIONS` é respondido antes da validação da chave, sem credenciais e sem `*`. Em QA e PROD defina as origens reais do `web-app`.
-
-`GET /health` responde se o processo está vivo (com a versão) e `GET /ready` se há provedor de visão configurado (503 sem nenhum). `POST /v1/images/analyze` exige `X-Service-Key` com a chave de um serviço chamador aceito (`SERVICE_KEY_<CHAMADOR>`) e formulário com `image`, `purpose` e, opcionalmente, `request_id`, `context_title` e `max_alt_chars` (qualquer inteiro positivo; padrão 150). A legenda é gerada em pt-BR. O Swagger fica em `/docs` e o contrato em `/openapi.json` (desligados com `DOCS_ENABLED=false`); o `openapi.yaml` do repositório é gerado por `make openapi`. Erros seguem o contrato de erro da organização (`application/problem+json` com `errorCode`).
-
-Configure a chave Gemini em `GEMINI_API_KEY` (a mesma dos demais serviços; `GEMINI_AI_ACCESSIBILITY_KEY` e `GOOGLE_API_KEY` ainda funcionam como nomes legados, nessa ordem de prioridade). `GROQ_API_KEY` (ou o legado `GROQ_AI_ACCESSIBILITY_KEY`) ativa o GroqCloud como fallback em falhas técnicas. Com `GROQ_MODEL` vazio, usa `qwen/qwen3.8-27b`. GroqCloud e xAI/Grok são serviços diferentes.
-
-`POST /debug/images/analyze` é o modo debug para administradores (JWT de admin, não o token interno): devolve a resposta normal mais as etapas da análise (`debug.nodes`), com o prompt de cada chamada ao modelo, e `POST /debug/images/stage` reexecuta uma etapa com o prompt editado. Fica fora do Swagger; veja [docs/debug-endpoint.md](docs/debug-endpoint.md).
-
-Uma aprovação é apenas um resultado da análise. O backend que futuramente receberá o upload deve manter o arquivo privado até o autor confirmar o texto alternativo e o sistema concluir a publicação.
-
-Na resposta, `risk_categories` lista categorias de risco identificadas. Lista vazia junto de `PROVIDER_UNAVAILABLE` não comprova que a imagem seja segura.
-
-<!-- pr de teste dos comentarios automaticos, pode reverter -->
-
-<!-- pr de teste dos comentarios automaticos, pode reverter -->
-
-<!-- pr de teste dos comentarios automaticos, pode reverter -->
-
-<!-- pr de teste dos comentarios automaticos, pode reverter -->
-
-<!-- pr de teste dos comentarios automaticos, pode reverter -->
-<!-- pr de teste para validar os comentarios do piloto de sync e release -->
+- [CONTRIBUTING.md](https://github.com/Solierrr/.github/blob/main/.github/CONTRIBUTING.md), convenções de contribuição.
+- [CODE_OF_CONDUCT.md](https://github.com/Solierrr/.github/blob/main/CODE_OF_CONDUCT.md), código de conduta.
+- [SECURITY.md](https://github.com/Solierrr/.github/blob/main/SECURITY.md), relato de vulnerabilidades.
