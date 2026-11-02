@@ -6,18 +6,19 @@ Este serviço interno do Solaria analisa imagens enviadas pela aplicação, iden
 
 O backend que receber o upload deve manter a imagem privada durante a análise e qualquer revisão. A integração oficial com login, quarentena, revisão humana, confirmação da legenda e publicação ainda precisa ser definida. O `web-app` deve ser consultado para confirmar o contrato atual de upload e exibição; não presuma que já exista integração com esta API.
 
-Consulte `../ai-assistant` quando houver dúvida sobre padrões de provedores de IA e `../ai-validation` para decisões determinísticas. Confirme os contratos no código atual antes de alterar integrações. Componentes de outros serviços, como banco, fila, grafo ou RAG, só devem ser adicionados quando houver necessidade concreta aqui.
+Consulte `../ai-assistant` quando houver dúvida sobre padrões de provedores de IA e `../ai-validation` para decisões determinísticas. Confirme os contratos no código atual antes de alterar integrações. O serviço segue a arquitetura dos demais serviços de IA: `solaria-network` (`ai_lib`) para chaves e modelos, agentes LangChain e grafo LangGraph. Banco, RAG e memória só entram quando houver necessidade concreta aqui.
 
 ## Mapa do código
 
-- `src/api/`: aplicação FastAPI, contrato HTTP, autenticação interna e limite do corpo antes do parser multipart.
-- `src/core/`: configuração, modelos e regras compartilhadas.
+- `src/api/`: aplicação FastAPI, contrato HTTP, erros e limite do corpo antes do parser multipart.
+- `src/core/`: `config/` (configurações), `llm/` (modelos e chaves sobre `ai_lib.llm`), `security/` (chave de serviço e acesso ao debug) e `observability/`.
+- `src/agents/`: o agente de visão LangChain (`base/`), os prompts de cada especialista (`specialist/moderation`, `specialist/caption`) e a montagem dos agentes (`factory/`).
+- `src/workflow/`: grafo LangGraph (`graph/`, `nodes/`, `edges/`, `state/`), rastreio de debug (`observability/`), reexecução de etapa e armazenamento do debug.
 - `src/image/`: leitura e normalização segura dos arquivos de imagem.
-- `src/providers/`: interfaces, prompts e clientes Gemini e GroqCloud.
-- `src/moderation/`: consolidação determinística dos sinais de risco.
-- `src/caption/`: geração e validação do texto alternativo.
-- `src/services/`: orquestração da análise.
-- `tests/`: casos de contrato e regras existentes.
+- `src/moderation/`: sinais e política determinística de risco.
+- `src/purpose/`, `src/caption/`: adequação à finalidade e validação local da legenda (quando presentes).
+- `src/services/`: contrato da resposta e invocação do grafo.
+- `tests/`: casos de contrato e regras; `tests/fakes.py` traz os modelos falsos do LangChain.
 
 Leia os módulos envolvidos antes de editar: os caminhos e contratos podem evoluir. `.github/CONTRIBUTING.md` contém as convenções de branch, commit e PR para `qa`.
 
@@ -25,15 +26,15 @@ Leia os módulos envolvidos antes de editar: os caminhos e contratos podem evolu
 
 1. `POST /v1/images/analyze` recebe `multipart/form-data` com `image` e `purpose` (`product`, `company_profile`, `professional_profile` ou `other`). `request_id`, `context_title` e `max_alt_chars` são opcionais; o limite padrão da legenda é 150 caracteres, e a API aceita qualquer inteiro positivo.
 2. A rota exige o cabeçalho `X-Service-Key` com a chave de um serviço chamador aceito, lida de `SERVICE_KEY_<CHAMADOR>` (nenhum chamador definido ainda; sem chave configurada, toda chamada recebe 401). A imagem é validada antes de chamar o provedor: JPEG, PNG ou WebP, até 8 MiB, até 8192 pixels por lado e 20 megapixels. Imagens inválidas, corrompidas ou animadas são rejeitadas. A normalização respeita a orientação EXIF e remove metadados.
-3. O provedor devolve sinais estruturados de risco. A política local toma a decisão final: `approved`, `review_required` ou `rejected`. Conteúdo proibido inequívoco pode ser rejeitado; suspeita, baixa confiança, contexto ambíguo e bloqueio de segurança exigem revisão.
+3. O modelo devolve sinais estruturados de risco (saída estruturada em Pydantic), em uma chamada de moderação. A política local toma a decisão final: `approved`, `review_required` ou `rejected`. Conteúdo proibido inequívoco pode ser rejeitado; suspeita, baixa confiança, contexto ambíguo e bloqueio de segurança exigem revisão.
 4. Somente uma imagem aprovada segue para geração da legenda. A legenda deve estar em pt-BR, obedecer ao limite solicitado e passar pela validação local. Há uma tentativa adicional quando a primeira resposta excede o limite.
-5. Gemini é o provedor principal. GroqCloud é fallback para falhas técnicas do provedor; bloqueio de segurança não deve ser contornado por fallback. Se nenhum provedor puder concluir a etapa, a análise falha de modo conservador com `PROVIDER_UNAVAILABLE`.
+5. A ordem dos provedores vem de `LLM_PROVIDER_ORDER` (padrão: Gemini, depois GroqCloud), entre os que têm chave. Cada provedor faz rodízio das chaves pela `ai_lib` (uma chave que atinge o limite descansa). O fallback entre provedores vale só para falhas técnicas; bloqueio de segurança não deve ser contornado por fallback. Se nenhum provedor puder concluir a etapa, a análise falha de modo conservador com `PROVIDER_UNAVAILABLE`.
 
 A resposta inclui `analysis_id`, `request_id`, `decision`, `reason_codes`, `risk_categories`, `alt_text`, `policy_version` e `model_version`. HTTP 200 indica que a requisição foi processada, não que a imagem foi aprovada. `risk_categories` vazio em uma falha técnica não significa ausência de risco. Rejeição, revisão, timeout, erro do provedor e saída inválida não autorizam publicação.
 
 ## Configuração e execução local
 
-Use `.env.example` como referência. Configure `SERVICE_KEY_<CHAMADOR>` para cada serviço chamador aceito (no mínimo 32 caracteres) e pelo menos uma chave de provedor: `GEMINI_API_KEY` ou `GROQ_API_KEY` (os nomes `GEMINI_AI_ACCESSIBILITY_KEY`, `GOOGLE_API_KEY` e `GROQ_AI_ACCESSIBILITY_KEY` seguem aceitos como legados). `CORS_ALLOWED_ORIGINS` lista as origens do navegador permitidas (o `CORSMiddleware` fica por fora do `UploadGate`, para o preflight não exigir chave). `GEMINI_MODEL` e `GROQ_MODEL` definem os modelos; o padrão do GroqCloud é `qwen/qwen3.8-27b`. GroqCloud não é xAI/Grok. As configurações também incluem timeout e concorrência. Nunca copie credenciais para documentação ou código.
+Use `.env.example` como referência. Configure `SERVICE_KEY_<CHAMADOR>` para cada serviço chamador aceito (no mínimo 32 caracteres) e pelo menos uma chave de provedor: `GEMINI_API_KEY` ou `GROQ_API_KEY`, com mais chaves em `<PROVEDOR>_API_KEY_2` a `_9` ou em `<PROVEDOR>_API_KEYS` separadas por vírgula (os nomes `GEMINI_AI_ACCESSIBILITY_KEY`, `GOOGLE_API_KEY` e `GROQ_AI_ACCESSIBILITY_KEY` seguem aceitos como legados). `CORS_ALLOWED_ORIGINS` lista as origens do navegador permitidas (o `CORSMiddleware` fica por fora do `UploadGate`, para o preflight não exigir chave). `GEMINI_MODEL` e `GROQ_MODEL` definem os modelos; o padrão do GroqCloud é `qwen/qwen3.8-27b`. GroqCloud não é xAI/Grok. As configurações também incluem timeout e concorrência. Nunca copie credenciais para documentação ou código.
 
 No ambiente virtual local, execute `./.venv/Scripts/python.exe -m uvicorn src.api.app:app --host 127.0.0.1 --port 8080` no PowerShell. Consulte `http://127.0.0.1:8080/docs` para a API (contrato em `/openapi.json`; `DOCS_ENABLED=false` desliga os dois), `GET /health` para saber se o processo está vivo e `GET /ready` para saber se há provedor configurado. No Swagger, informe a chave de serviço em **Authorize**. Erros respondem em `application/problem+json` com `errorCode`. O contrato versionado `openapi.yaml` é gerado por `make openapi`. Reinicie o processo após alterar `.env`. O `Dockerfile` também executa o serviço na porta 8080.
 
@@ -41,7 +42,7 @@ O `infra-scripts` pode fornecer variáveis para desenvolvimento local via vault,
 
 ## Modo debug
 
-`POST /debug/images/analyze` (fora do OpenAPI) roda a mesma análise e devolve também as etapas como `debug.nodes`, registradas por `src/services/trace.py` (`StepRecorder`, passado a `analyze_image` como `trace`). Nunca entram imagem, legenda nem mensagem do provedor; as etapas `moderation` e `caption` trazem o prompt enviado (com PII mascarada), o modelo e os tokens, capturados pelo `CallCapture` (`src/providers/capture.py`) que os provedores recebem só no debug. `POST /debug/images/stage` reexecuta uma dessas etapas com o prompt editado, a partir da imagem guardada em memória por `src/services/debug_runs.py` (15 min, por admin). O acesso é por JWT de admin (`src/api/debug_access.py`): liga com `DEBUG_ADMIN_SUBS` preenchido e `ENVIRONMENT` em `LOCAL`, `DEV`, `QA` ou `PROD`; o token interno não abre a rota. O `UploadGate` aplica o limite de tamanho às rotas de debug. Detalhes em `docs/debug-endpoint.md`; ao criar uma etapa nova em `analyze_image`, registre-a com `note(...)` e atualize esse documento.
+`POST /debug/images/analyze` (fora do OpenAPI) roda a mesma análise e devolve também as etapas como `debug.nodes`, registradas por `src/workflow/observability/debug_tracker.py` (`StepRecorder`, passado a `analyze_image` como `trace`). Nunca entram imagem, legenda nem mensagem do provedor; as etapas `moderation` e `caption` trazem o prompt enviado (com PII mascarada), o modelo e os tokens, capturados por um callback do LangChain (`LlmCallCapture`) que só é registrado no debug. `POST /debug/images/stage` reexecuta uma dessas etapas com o prompt editado, com `src/workflow/debug_replay.py`, a partir da imagem guardada em memória por `src/workflow/debug_runs.py` (15 min, por admin). O acesso é por JWT de admin (`src/core/security/debug_access.py`): liga com `DEBUG_ADMIN_SUBS` preenchido e `ENVIRONMENT` em `LOCAL`, `DEV`, `QA` ou `PROD`; o token interno não abre a rota. O `UploadGate` aplica o limite de tamanho às rotas de debug. Detalhes em `docs/debug-endpoint.md`; ao criar uma etapa nova no grafo, registre-a com `tracker.add(...)` no nó e atualize esse documento.
 
 ## Invariantes de segurança e acessibilidade
 
