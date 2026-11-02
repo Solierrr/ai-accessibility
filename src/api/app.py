@@ -13,7 +13,10 @@ from fastapi.responses import JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
 
-from src.api.debug_access import authorize_debug
+from src.agents.base.vision_agent import VisionProvider
+from src.agents.factory.vision_agents import build_vision_agents
+from src.agents.specialist.caption.caption_prompt import caption_prompt
+from src.agents.specialist.moderation.moderation_prompt import MODERATION_PROMPT
 from src.api.errors import ApiError, register_error_handlers
 from src.api.openapi import (
     CONTACT,
@@ -25,33 +28,26 @@ from src.api.openapi import (
     TITLE,
     install_openapi,
 )
-from src.api.service_auth import (
+from src.api.upload_gate import UploadGate
+from src.caption.validation import DEFAULT_ALT_TEXT_CHARS
+from src.core.config.settings import Settings
+from src.core.observability.observability import setup_observability
+from src.core.security.debug_access import authorize_debug
+from src.core.security.service_auth import (
     SERVICE_KEY_HEADER,
     resolve_caller,
     service_key_header,
 )
-from src.api.upload_gate import UploadGate
-from src.caption.validation import DEFAULT_ALT_TEXT_CHARS
-from src.core.config import Settings
-from src.core.observability.observability import setup_observability
 from src.image.validation import MAX_UPLOAD_BYTES, ImageValidationError, validate_image
-from src.providers.capture import CallCapture
-from src.providers.gemini import (
-    GeminiVisionProvider,
-    ProviderBlocked,
-    ProviderError,
-    VisionProvider,
-)
-from src.providers.groq import GroqVisionProvider
-from src.providers.prompts import MODERATION_PROMPT, caption_prompt
 from src.services.analysis import AnalysisResponse, analyze_image
-from src.services.debug_runs import DebugRunStore, StoredRun
-from src.services.trace import (
-    StepRecorder,
-    completion_summary,
-    llm_calls,
-)
 from src.version import VERSION
+from src.workflow.debug_replay import (
+    REPLAYABLE_STAGES,
+    STAGE_BLOCKED_REASON,
+    replay_stage,
+)
+from src.workflow.debug_runs import DebugRunStore, StoredRun
+from src.workflow.observability.debug_tracker import StepRecorder
 
 logger = logging.getLogger(__name__)
 # JWT de administrador, só nas rotas de debug (fora do contrato)
@@ -101,100 +97,17 @@ class StageRequest(BaseModel):
     prompts: list[PromptOverrideItem] = Field(default_factory=list, max_length=10)
 
 
-REPLAYABLE_STAGES = {"moderation": "policy", "caption": "caption_validation"}
-STAGE_BLOCKED_REASON = (
-    "Esta etapa não chama um modelo: não há prompt para editar. "
-    "Só moderation e caption podem ser reexecutadas."
-)
-
-
-async def _run_stage(
-    stage: str,
-    stage_provider: VisionProvider,
-    image,
-    run: StoredRun,
-    prompt: str | None,
-    capture: CallCapture,
-    recorder: StepRecorder,
-) -> None:
-    inputs: dict[str, object] = (
-        {"mime_type": image.mime_type, "width": image.width, "height": image.height}
-        if stage == "moderation"
-        else {
-            "purpose": run.purpose,
-            "max_alt_chars": run.max_alt_chars,
-            "context_title_chars": len(run.context_title),
-        }
-    )
-    try:
-        if stage == "moderation":
-            observation = await stage_provider.moderate(
-                image, prompt=prompt, capture=capture
-            )
-            signals = observation.assessment.model_dump(mode="json")
-            recorder.add(
-                stage,
-                "ok",
-                provider=stage_provider.model_version,
-                safety_flagged=observation.safety_flagged,
-                signals=signals,
-                inputs=inputs,
-                llm_calls=llm_calls(
-                    capture,
-                    completion_summary(
-                        **signals, safety_flagged=observation.safety_flagged
-                    ),
-                ),
-            )
-            return
-        suggestion = await stage_provider.caption(
-            image,
-            purpose=run.purpose,
-            title=run.context_title,
-            max_alt_chars=run.max_alt_chars,
-            prompt=prompt,
-            capture=capture,
-        )
-        recorder.add(
-            stage,
-            "ok",
-            provider=stage_provider.model_version,
-            uncertain=suggestion.uncertain,
-            alt_text_chars=len(suggestion.alt_text),
-            inputs=inputs,
-            llm_calls=llm_calls(
-                capture,
-                completion_summary(
-                    uncertain=suggestion.uncertain,
-                    alt_text_chars=len(suggestion.alt_text),
-                ),
-            ),
-        )
-    except ProviderError as exc:
-        recorder.add(
-            stage,
-            "blocked" if isinstance(exc, ProviderBlocked) else "error",
-            provider=stage_provider.model_version,
-            status_code=exc.status_code,
-            cause_type=type(exc.__cause__).__name__ if exc.__cause__ else None,
-            inputs=inputs,
-            llm_calls=llm_calls(capture, None),
-        )
-
-
 def create_app(
     settings: Settings | None = None,
     provider: VisionProvider | None = None,
     fallback_provider: VisionProvider | None = None,
 ) -> FastAPI:
     settings = settings or Settings.from_env()
-    provider = provider or (
-        GeminiVisionProvider(settings)
-        if settings.google_api_key
-        else GroqVisionProvider(settings)
-    )
-    if fallback_provider is None and settings.google_api_key and settings.groq_api_key:
-        fallback_provider = GroqVisionProvider(settings)
+    if provider is None:
+        configured = build_vision_agents(settings)
+        provider = configured[0] if configured else None
+        if fallback_provider is None and len(configured) > 1:
+            fallback_provider = configured[1]
     semaphore = asyncio.Semaphore(settings.max_concurrent_analyses)
     runs = DebugRunStore()
     application = FastAPI(
@@ -249,7 +162,7 @@ def create_app(
         openapi_extra={"security": [], "x-error-codes": ["INTERNAL_ERROR"]},
     )
     async def ready() -> JSONResponse:
-        if not settings.ready:
+        if provider is None:
             return JSONResponse({"status": "DOWN"}, status_code=503)
         return JSONResponse({"status": "UP"})
 
@@ -262,7 +175,7 @@ def create_app(
         trace: StepRecorder | None = None,
     ) -> tuple[AnalysisResponse, bytes]:
         """Parte comum às rotas `analyze` e `debug_analyze`, depois da autenticação."""
-        if not (settings.google_api_key or settings.groq_api_key):
+        if provider is None:
             raise ApiError(
                 503, "DEPENDENCY_UNAVAILABLE", "Provedor de visão não configurado."
             )
@@ -462,11 +375,10 @@ def create_app(
             None,
         )
         applied = int(edited is not None and edited != default_prompt)
-        capture = CallCapture()
         recorder = StepRecorder()
         async with semaphore:
-            await _run_stage(
-                payload.node, stage_provider, image, run, edited, capture, recorder
+            await replay_stage(
+                payload.node, stage_provider, image, run, edited, recorder
             )
         debug = recorder.snapshot()
         debug["environment"] = settings.environment

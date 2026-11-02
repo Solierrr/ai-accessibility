@@ -7,9 +7,10 @@ from unittest.mock import patch
 
 import httpx
 
+from src.agents.base.vision_agent import ProviderBlocked, ProviderError
 from src.api.app import create_app
-from src.core.config import Settings
-from src.providers.gemini import ProviderBlocked, ProviderError
+from src.core.config.settings import Settings
+from tests.fakes import simulate_llm_call
 from tests.test_analysis import FakeProvider as BaseProvider
 from tests.test_analysis import assessment, valid_image
 
@@ -35,15 +36,13 @@ class FakeProvider(BaseProvider):
         self.model_version = model_version
         self.moderation_error = moderation_error
 
-    async def moderate(self, image, *, prompt=None, capture=None):
+    async def moderate(self, image, *, prompt=None, config=None):
         if self.moderation_error is not None:
-            if capture is not None:
-                record = capture.begin(
-                    prompt or "MODERATION-PROMPT", self.model_version
-                )
-                record.fail(self.moderation_error)
+            await simulate_llm_call(
+                config, prompt or "MODERATION-PROMPT", self.moderation_error
+            )
             raise self.moderation_error
-        return await super().moderate(image, prompt=prompt, capture=capture)
+        return await super().moderate(image, prompt=prompt, config=config)
 
 
 def fake_decode(token: str, *, jwks_url: str, issuer: str) -> str | None:
@@ -52,7 +51,6 @@ def fake_decode(token: str, *, jwks_url: str, issuer: str) -> str | None:
 
 def make_settings(**overrides: object) -> Settings:
     data = {
-        "google_api_key": "test-key",
         "service_keys": {"api-core": SERVICE_KEY},
         "environment": "QA",
         "debug_admin_subs": ADMIN,
@@ -84,7 +82,7 @@ def post_debug(
                 headers=headers,
             )
 
-    with patch("src.api.debug_access.decode_user_id", fake_decode):
+    with patch("src.core.security.debug_access.decode_user_id", fake_decode):
         return asyncio.run(run())
 
 

@@ -1,2 +1,2 @@
 [lint.per-file-ignores]
-"src/api/debug_access.py" = ["BLE001"]
+"src/core/security/debug_access.py" = ["BLE001"]

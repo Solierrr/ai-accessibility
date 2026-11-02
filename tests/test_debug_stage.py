@@ -5,15 +5,17 @@ from unittest.mock import patch
 
 import httpx
 
+from src.agents.base.vision_agent import ProviderError
+from src.agents.specialist.moderation.moderation_prompt import MODERATION_PROMPT
 from src.api.app import create_app
-from src.core.config import Settings
-from src.providers.capture import CallCapture
-from src.providers.gemini import GeminiVisionProvider, ProviderError
-from src.providers.groq import GroqVisionProvider
-from src.providers.prompts import MODERATION_PROMPT
-from src.services import debug_runs
-from src.services.debug_runs import DebugRunStore, StoredRun
-from src.services.trace import clean_prompt, mask_pii
+from src.workflow import debug_runs
+from src.workflow.debug_runs import DebugRunStore, StoredRun
+from src.workflow.observability.debug_tracker import (
+    LlmCallCapture,
+    clean_prompt,
+    mask_pii,
+)
+from tests.fakes import simulate_llm_call
 from tests.test_analysis import valid_image
 from tests.test_debug import (
     ADMIN,
@@ -44,7 +46,7 @@ class Client:
             ) as client:
                 return await client.request(method, path, **kwargs)
 
-        with patch("src.api.debug_access.decode_user_id", self.decode):
+        with patch("src.core.security.debug_access.decode_user_id", self.decode):
             return asyncio.run(run())
 
     def analyze(self, *, title="", token=ADMIN_TOKEN, content=None):
@@ -109,10 +111,9 @@ class LlmCallsInTheTrace(unittest.TestCase):
     def test_title_with_pii_is_masked_and_blocks_editing(self) -> None:
         class Echo(FakeProvider):
             async def caption(
-                self, image, *, purpose, title, max_alt_chars, prompt=None, capture=None
+                self, image, *, purpose, title, max_alt_chars, prompt=None, config=None
             ):
-                if capture is not None:
-                    capture.begin(f"Título: {title}", self.model_version).done()
+                await simulate_llm_call(config, f"Título: {title}")
                 return await super().caption(
                     image, purpose=purpose, title=title, max_alt_chars=max_alt_chars
                 )
@@ -148,13 +149,16 @@ class LlmCallsInTheTrace(unittest.TestCase):
         self.assertEqual(good["turn"], 0)
         self.assertNotIn("run_id", bad)
 
-    def test_normal_route_calls_the_provider_without_capture(self) -> None:
-        class Strict(FakeProvider):
-            async def moderate(self, image):
-                return await FakeProvider.moderate(self, image)
+    def test_normal_route_registers_no_debug_callbacks(self) -> None:
+        configs = []
+
+        class Spy(FakeProvider):
+            async def moderate(self, image, *, prompt=None, config=None):
+                configs.append(config)
+                return await super().moderate(image, prompt=prompt, config=config)
 
         async def run():
-            app = create_app(make_settings(), Strict(), None)
+            app = create_app(make_settings(), Spy(), None)
             async with httpx.AsyncClient(
                 transport=httpx.ASGITransport(app=app), base_url="http://test"
             ) as client:
@@ -166,6 +170,10 @@ class LlmCallsInTheTrace(unittest.TestCase):
                 )
 
         self.assertEqual(asyncio.run(run()).status_code, 200)
+        self.assertEqual(len(configs), 1)
+        self.assertIsNone(configs[0]["configurable"]["tracker"])
+        handlers = getattr(configs[0].get("callbacks"), "handlers", [])
+        self.assertFalse([h for h in handlers if isinstance(h, LlmCallCapture)])
 
 
 class StageReplay(unittest.TestCase):
@@ -391,171 +399,6 @@ class Masking(unittest.TestCase):
 
         self.assertTrue(complete)
         self.assertEqual(len(text), 500000)
-
-
-def _handler(payload):
-    def handle(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, json=payload)
-
-    return handle
-
-
-class ProviderCapture(unittest.TestCase):
-    @staticmethod
-    def gemini_payload(text, usage=None):
-        payload = {
-            "candidates": [
-                {"finishReason": "STOP", "content": {"parts": [{"text": text}]}}
-            ]
-        }
-        if usage:
-            payload["usageMetadata"] = usage
-        return payload
-
-    def image(self):
-        from tests.test_gemini_provider import sample_image
-
-        return sample_image()
-
-    def test_gemini_records_prompt_model_and_tokens(self) -> None:
-        payload = self.gemini_payload(
-            json.dumps({"alt_text": "Painel", "uncertain": False}),
-            {"promptTokenCount": 120, "candidatesTokenCount": 7},
-        )
-
-        async def run():
-            async with httpx.AsyncClient(
-                transport=httpx.MockTransport(_handler(payload))
-            ) as client:
-                provider = GeminiVisionProvider(Settings("k"), client)
-                capture = CallCapture()
-                await provider.caption(
-                    self.image(),
-                    purpose="product",
-                    title="",
-                    max_alt_chars=100,
-                    prompt="MEU PROMPT",
-                    capture=capture,
-                )
-                return capture
-
-        (record,) = asyncio.run(run()).calls
-        self.assertEqual(record.prompt, "MEU PROMPT")
-        self.assertTrue(record.model.startswith("gemini/"))
-        self.assertEqual((record.tokens_in, record.tokens_out), (120, 7))
-        self.assertIsNone(record.error)
-
-    def test_custom_prompt_is_not_reused_by_the_retry(self) -> None:
-        sent = []
-
-        def handle(request: httpx.Request) -> httpx.Response:
-            sent.append(json.loads(request.content)["contents"][0]["parts"][0]["text"])
-            text = "Muito longa para o limite" if len(sent) == 1 else "Curta"
-            return httpx.Response(
-                200,
-                json=self.gemini_payload(
-                    json.dumps({"alt_text": text, "uncertain": False})
-                ),
-            )
-
-        async def run():
-            async with httpx.AsyncClient(
-                transport=httpx.MockTransport(handle)
-            ) as client:
-                provider = GeminiVisionProvider(Settings("k"), client)
-                capture = CallCapture()
-                await provider.caption(
-                    self.image(),
-                    purpose="product",
-                    title="",
-                    max_alt_chars=10,
-                    prompt="MEU PROMPT",
-                    capture=capture,
-                )
-                return capture
-
-        capture = asyncio.run(run())
-        self.assertEqual(sent[0], "MEU PROMPT")
-        self.assertIn("A resposta anterior excedeu", sent[1])
-        self.assertEqual(len(capture.calls), 2)
-
-    def test_failure_keeps_only_type_and_status(self) -> None:
-        def handle(request: httpx.Request) -> httpx.Response:
-            return httpx.Response(429, text="segredo do provedor")
-
-        async def run():
-            async with httpx.AsyncClient(
-                transport=httpx.MockTransport(handle)
-            ) as client:
-                provider = GeminiVisionProvider(Settings("k"), client)
-                capture = CallCapture()
-                image = self.image()
-                with self.assertRaises(ProviderError):
-                    await provider.moderate(image, capture=capture)
-                return capture
-
-        (record,) = asyncio.run(run()).calls
-        self.assertEqual(record.error, "ProviderError (HTTP 429)")
-        self.assertNotIn("segredo", repr(record))
-
-    def test_groq_records_tokens_and_uses_the_given_prompt(self) -> None:
-        sent = []
-        assessment = {
-            "sexual_content": "none",
-            "graphic_violence": "none",
-            "hateful_content": "none",
-            "offensive_text": "none",
-            "context": "ordinary",
-            "confidence": "high",
-            "prompt_injection": False,
-            "uncertain": False,
-        }
-
-        def handle(request: httpx.Request) -> httpx.Response:
-            sent.append(
-                json.loads(request.content)["messages"][0]["content"][0]["text"]
-            )
-            return httpx.Response(
-                200,
-                json={
-                    "choices": [
-                        {
-                            "finish_reason": "stop",
-                            "message": {"content": json.dumps(assessment)},
-                        }
-                    ],
-                    "usage": {"prompt_tokens": 50, "completion_tokens": 9},
-                },
-            )
-
-        async def run():
-            async with httpx.AsyncClient(
-                transport=httpx.MockTransport(handle)
-            ) as client:
-                provider = GroqVisionProvider(Settings(None, groq_api_key="g"), client)
-                capture = CallCapture()
-                await provider.moderate(self.image(), prompt="OUTRO", capture=capture)
-                return capture
-
-        (record,) = asyncio.run(run()).calls
-        self.assertEqual(sent, ["OUTRO"])
-        self.assertEqual((record.tokens_in, record.tokens_out), (50, 9))
-
-    def test_without_capture_nothing_is_recorded(self) -> None:
-        payload = self.gemini_payload(
-            json.dumps({"alt_text": "Painel", "uncertain": False})
-        )
-
-        async def run():
-            async with httpx.AsyncClient(
-                transport=httpx.MockTransport(_handler(payload))
-            ) as client:
-                provider = GeminiVisionProvider(Settings("k"), client)
-                return await provider.caption(
-                    self.image(), purpose="product", title="", max_alt_chars=100
-                )
-
-        self.assertEqual(asyncio.run(run()).alt_text, "Painel")
 
 
 if __name__ == "__main__":

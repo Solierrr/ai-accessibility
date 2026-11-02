@@ -24,12 +24,12 @@ def cors_origins(raw: str) -> tuple[str, ...]:
 
 @dataclass(frozen=True, slots=True)
 class Settings:
-    google_api_key: str | None
+    """Configuração do serviço. As chaves de LLM não ficam aqui: `src/core/llm/keys.py` as lê."""
+
     service_keys: Mapping[str, str] = field(default_factory=dict)
     gemini_model: str = "gemini-3.5-flash"
     gemini_timeout_seconds: float = 60.0
     max_concurrent_analyses: int = 4
-    groq_api_key: str | None = None
     groq_model: str = "qwen/qwen3.8-27b"
     docs_enabled: bool = True
     environment: str = "LOCAL"
@@ -37,6 +37,8 @@ class Settings:
     jwt_jwks_url: str | None = None
     jwt_issuer: str | None = None
     cors_allowed_origins: tuple[str, ...] = cors_origins(DEFAULT_CORS_ALLOWED_ORIGINS)
+    # Variáveis de onde saem as chaves de LLM; None lê o ambiente do processo.
+    llm_env: Mapping[str, str] | None = None
 
     def __post_init__(self) -> None:
         for caller, key in self.service_keys.items():
@@ -48,7 +50,7 @@ class Settings:
 
     @classmethod
     def from_env(cls) -> "Settings":
-        load_dotenv(Path(__file__).resolve().parents[2] / ".env", override=False)
+        load_dotenv(Path(__file__).resolve().parents[3] / ".env", override=False)
         model = os.getenv("GEMINI_MODEL", "gemini-3.5-flash")
         if not _MODEL_PATTERN.fullmatch(model):
             raise ValueError("GEMINI_MODEL contém caracteres inválidos")
@@ -60,14 +62,6 @@ class Settings:
         if timeout <= 0 or not 1 <= concurrency <= 32:
             raise ValueError("Configuração de timeout ou concorrência inválida")
         return cls(
-            # Nomes compartilhados com os demais serviços (uma chave por provedor); os nomes
-            # antigos continuam aceitos.
-            google_api_key=(
-                os.getenv("GEMINI_API_KEY")
-                or os.getenv("GEMINI_AI_ACCESSIBILITY_KEY")
-                or os.getenv("GOOGLE_API_KEY")
-                or None
-            ),
             service_keys={
                 caller: key
                 for caller in SERVICE_CALLERS
@@ -76,11 +70,6 @@ class Settings:
             gemini_model=model,
             gemini_timeout_seconds=timeout,
             max_concurrent_analyses=concurrency,
-            groq_api_key=(
-                os.getenv("GROQ_API_KEY")
-                or os.getenv("GROQ_AI_ACCESSIBILITY_KEY")
-                or None
-            ),
             groq_model=groq_model,
             docs_enabled=os.getenv("DOCS_ENABLED", "true").strip().lower() != "false",
             environment=os.getenv("ENVIRONMENT") or "LOCAL",
@@ -91,7 +80,3 @@ class Settings:
                 os.getenv("CORS_ALLOWED_ORIGINS") or DEFAULT_CORS_ALLOWED_ORIGINS
             ),
         )
-
-    @property
-    def ready(self) -> bool:
-        return bool(self.google_api_key or self.groq_api_key)

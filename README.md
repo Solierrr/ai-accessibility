@@ -7,6 +7,7 @@
   <img src="./assets/readme/stacks/pydantic.png" width="100" hspace="8" alt="Pydantic" title="Pydantic">
   <img src="./assets/readme/stacks/gemini.png" width="100" hspace="8" alt="Gemini" title="Gemini">
   <img src="./assets/readme/stacks/groq.png" width="100" hspace="8" alt="Groq" title="Groq">
+  <img src="https://skills.syvixor.com/api/icons?i=langchain" width="100" hspace="8" alt="LangChain" title="LangChain">
 </p>
 
 # Análise e descrição de imagens
