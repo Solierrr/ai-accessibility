@@ -16,4 +16,4 @@ jobs:
     with:
       contract: openapi.yaml
       export-command: python -m pip install -q -r requirements.txt pyyaml && make openapi PY=python
-      python-version: "3.12"
+      python-version: "3.14"

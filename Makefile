@@ -9,7 +9,7 @@ PY ?= .venv/Scripts/python
 else
 PY ?= .venv/bin/python
 endif
-INSTALL_CMD   ?= python -m venv .venv && $(PY) -m pip install -r requirements.txt ruff pytest pytest-cov pyyaml
+INSTALL_CMD   ?= python -m venv .venv && $(PY) -m pip install -r requirements.txt ruff pytest pytest-cov pyyaml respx
 DEV_CMD       ?= $(PY) -m uvicorn src.api.app:app --host 127.0.0.1 --port 8080 --reload
 BUILD_CMD     ?= $(PY) -m compileall -q src tests
 TEST_CMD      ?= $(PY) -m pytest tests
